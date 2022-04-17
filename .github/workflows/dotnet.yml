@@ -27,7 +27,7 @@ jobs:
     - name: Get current version
       run: |
         dotnet tool install --global Nito.ProjProps
-        echo "NEWTAG=v$(projprops --name version --output-format SingleValueOnly --project src --project-search)" >> $GITHUB_ENV
+        echo "NEWTAG=v$(projprops --project src/Directory.Build.props --name version --output-format SingleValueOnly)" >> $GITHUB_ENV
     - name: Build
       run: dotnet build --no-restore
     - name: Make packages
