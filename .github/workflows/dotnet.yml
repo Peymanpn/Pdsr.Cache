@@ -19,6 +19,15 @@ jobs:
         dotnet-version: 6.0.x
     - name: Restore dependencies
       run: dotnet restore
+    - name: Get existing tag
+      id: existingtag
+      uses: WyriHaximus/github-action-get-previous-tag@0.2.0
+      continue-on-error: true
+
+    - name: Get current version
+      run: |
+        dotnet tool install --global Nito.ProjProps
+        echo "NEWTAG=v$(projprops --name version --output-format SingleValueOnly --project src --project-search)" >> $GITHUB_ENV
     - name: Build
       run: dotnet build --no-restore
     - name: Make packages
