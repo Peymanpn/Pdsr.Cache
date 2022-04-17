@@ -4,7 +4,7 @@
         <LangVersion>10.0</LangVersion>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
-        <Description>Cache helper</Description>
+        <Description>Pdsr Cache helper library</Description>
         <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
         <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     </PropertyGroup>
@@ -17,9 +17,15 @@
     </PropertyGroup>
 
     <PropertyGroup Label="Package Info files">
-        <PackageReadmeFile>README.md</PackageReadmeFile>
+		<Title>Pdsr.Cache</Title>
+		<PackageVersion>$(Version)</PackageVersion>
+		<PackageReadmeFile>README.md</PackageReadmeFile>
         <PackageIcon>pdsr-logo-128.png</PackageIcon>
         <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+		<PackageProjectUrl>https://github.com/Peymanpn/Pdsr.Cache</PackageProjectUrl>
+		<RepositoryType>git</RepositoryType>
+		<RepositoryUrl>https://github.com/Peymanpn/Pdsr.Cache</RepositoryUrl>
+		<PackageTags>Cache;PdsrCache;CacheHelper;</PackageTags>
     </PropertyGroup>
 
     <ItemGroup>
@@ -41,10 +47,10 @@
     </ItemGroup>
 
     <!--<PropertyGroup Condition="'$(Configuration)' == 'Debug'">-->
-    <PropertyGroup>
+    <!--<PropertyGroup>
         <SignAssembly>True</SignAssembly>
         <AssemblyOriginatorKeyFile>../../../../../pdsr.snk</AssemblyOriginatorKeyFile>
-    </PropertyGroup>
+    </PropertyGroup>-->
 
     <ItemGroup>
         <Using Include="Pdsr.Cache"/>
