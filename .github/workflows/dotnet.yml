@@ -43,9 +43,11 @@ jobs:
           **/*.nupkg
           **/*.snupkg
     - name: Publish packages
+      env:
+        NUGET_API_TOKEN: ${{ secrets.NUGET_API_KEY }}
       if: env.NEWTAG != steps.existingtag.outputs.tag
       run: |
-        dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
+        dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ NUGET_API_KEY }}
     - name: Create tag
       if: env.NEWTAG != steps.existingtag.outputs.tag
       run: |
