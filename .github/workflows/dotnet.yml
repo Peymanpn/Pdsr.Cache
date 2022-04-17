@@ -31,11 +31,11 @@ jobs:
     - name: Build
       run: dotnet build --no-restore
     - name: Make packages
-      run: dotnet pack --no-build --no-restore --output packages/
+      run: dotnet pack --no-build --no-restore --output /artifacts/
     - name: Publish packages
       if: env.NEWTAG != steps.existingtag.outputs.tag
       run: |
-        dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
+        dotnet nuget push /artifacts/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
     - name: Create tag
       if: env.NEWTAG != steps.existingtag.outputs.tag
       run: |
