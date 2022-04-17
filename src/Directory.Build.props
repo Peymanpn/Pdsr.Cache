@@ -1,0 +1,67 @@
+<Project>
+    <PropertyGroup>
+        <Version>3.0.1.301</Version>
+        <LangVersion>10.0</LangVersion>
+        <Nullable>enable</Nullable>
+        <ImplicitUsings>enable</ImplicitUsings>
+        <Description>Cache helper</Description>
+        <GeneratePackageOnBuild>false</GeneratePackageOnBuild>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <Product />
+        <SourceRevisionId>$([System.DateTime]::UtcNow.ToString("yyyyMMddHHmmss"))</SourceRevisionId>
+        <Copyright>© $([System.DateTime]::UtcNow.ToString("yyyy")) Peyman.R</Copyright>
+        <Authors><![CDATA[Peyman Ranjbar <peymanpn@yahoo.com>]]></Authors>
+    </PropertyGroup>
+
+    <PropertyGroup Label="Package Info files">
+        <PackageReadmeFile>README.md</PackageReadmeFile>
+        <PackageIcon>pdsr-logo-128.png</PackageIcon>
+        <PackageLicenseFile>LICENSE.md</PackageLicenseFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <None Include="../../pdsr-logo-128.png">
+            <Pack>True</Pack>
+            <PackagePath></PackagePath>
+        </None>
+
+        <None Include="../../README.md">
+            <Pack>True</Pack>
+            <PackagePath></PackagePath>
+        </None>
+
+
+        <None Include="../../LICENSE.md">
+            <Pack>True</Pack>
+            <PackagePath></PackagePath>
+        </None>
+    </ItemGroup>
+
+    <!--<PropertyGroup Condition="'$(Configuration)' == 'Debug'">-->
+    <PropertyGroup>
+        <SignAssembly>True</SignAssembly>
+        <AssemblyOriginatorKeyFile>../../../../../pdsr.snk</AssemblyOriginatorKeyFile>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Using Include="Pdsr.Cache"/>
+    </ItemGroup>
+
+    <PropertyGroup>
+        <EnablePackageValidation>true</EnablePackageValidation>
+        <RuntimeIdentifiers>$(RID_win)$(RID_alpine)$(RID_rhel)$(RID_ubuntu)$(RID_musl)$(RID_osx)</RuntimeIdentifiers>
+        <SupportedFrameworks>netstandard2.0;netstandard2.1;netcoreapp3.1;net5.0;net6.0</SupportedFrameworks>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <RID_win>win10-x64</RID_win>
+        <RID_alpine>alpine.3.12-x64;alpine.3.13-x64;alpine.3.14-x64;</RID_alpine>
+        <RID_rhel>rhel-x64;rhel.8-x64;</RID_rhel>
+        <RID_ubuntu>ubuntu.16.04-x64;</RID_ubuntu>
+        <RID_musl>linux-musl-x64;</RID_musl>
+        <RID_osx></RID_osx>
+    </PropertyGroup>
+</Project>
