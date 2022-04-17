@@ -40,12 +40,6 @@
         </None>
     </ItemGroup>
 
-    <!--<PropertyGroup Condition="'$(Configuration)' == 'Debug'">-->
-    <PropertyGroup>
-        <SignAssembly>True</SignAssembly>
-        <AssemblyOriginatorKeyFile>../../../../../pdsr.snk</AssemblyOriginatorKeyFile>
-    </PropertyGroup>
-
     <ItemGroup>
         <Using Include="Pdsr.Cache"/>
     </ItemGroup>
