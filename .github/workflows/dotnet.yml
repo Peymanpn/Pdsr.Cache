@@ -13,27 +13,26 @@ jobs:
   build:
 
     runs-on: ubuntu-latest
-
     steps:
     - uses: actions/checkout@v3
+      with:
+        fetch-depth: 0
     - name: Setup .NET
       uses: actions/setup-dotnet@v2
       with:
         dotnet-version: 6.0.x
     - name: Restore dependencies
       run: dotnet restore
-    - name: Get existing tag
-      id: existingtag
-      uses: WyriHaximus/github-action-get-previous-tag@0.2.0
-      continue-on-error: true
+    - name: signing key
+      run: echo ${{ secrets.SNKEY }} | base64 -d > key.snk
     - name: Get current version
       run: |
         dotnet tool install --global Nito.ProjProps
-        echo "NEWTAG=v$(projprops --project src/Directory.Build.props --name version --output-format SingleValueOnly)" >> $GITHUB_ENV
+        echo "NEWTAG=v$(projprops --project src/Directory.Build.props)" >> $GITHUB_ENV
     - name: Build
-      run: dotnet build --no-restore
+      run: dotnet build --configuration Release -p:SignAssembly=True --no-restore
     - name: Make packages
-      run: dotnet pack --no-build --no-restore --output ./artifacts/
+      run: dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/
     - name: Upload package artifacts
       uses: actions/upload-artifact@v2
       with:
@@ -44,8 +43,3 @@ jobs:
     - name: Publish packages
       if: env.NEWTAG != steps.existingtag.outputs.tag
       run: dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
-    - name: Create tag
-      if: env.NEWTAG != steps.existingtag.outputs.tag
-      run: |
-        git tag ${{ env.NEWTAG }}
-        git push --tags
