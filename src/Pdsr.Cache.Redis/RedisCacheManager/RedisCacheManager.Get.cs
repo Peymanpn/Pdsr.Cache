@@ -118,8 +118,9 @@ public partial class RedisCacheManager : ICacheManager, IRedisCacheManager
         var dbValue = await Redis.StringGetAsync(key);
         if (dbValue.HasValue)
         {
-            // if (typeof(T) == typeof(byte[])) return (T)dbValue.Box();
-            return Deserialize<T>(dbValue);
+            if (dbValue.IsNullOrEmpty) return default;
+            else
+                return Deserialize<T>(dbValue!);
         }
         else
         {

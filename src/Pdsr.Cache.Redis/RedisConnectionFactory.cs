@@ -74,7 +74,13 @@ namespace Pdsr.Cache
                 }
             }
             if (endpoints == null)
+            {
+                if (endpoint is null)
+                {
+                    throw new NullReferenceException($"One of 'endpoint' or 'endpoints' must be provided'");
+                }
                 rediConnectConfigs.EndPoints.Add(endpoint);
+            }
             else
                 foreach (var ep in endpoints)
                 {
