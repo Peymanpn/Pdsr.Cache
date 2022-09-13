@@ -5,8 +5,7 @@ public partial class RedisCacheManager
     #region Internal
     private Task SetAsyncInternal<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default)
     {
-        TimeSpan? expiry = null;
-        if (cacheTime is not null) expiry = TimeSpan.FromSeconds(cacheTime.Value);
+        TimeSpan? expiry = GetExpiry(cacheTime);
         return SetAsyncInternal<T>(key, data, expiry, cancellationToken);
     }
 
@@ -20,7 +19,7 @@ public partial class RedisCacheManager
 
     private void SetInternal<T>(string key, T? data, int? cacheTime = null)
     {
-        TimeSpan? expiry = null;
+        TimeSpan? expiry = GetExpiry(cacheTime);
         SetInternal<T>(key, data, expiry);
     }
 
@@ -31,13 +30,25 @@ public partial class RedisCacheManager
     }
 
 
-
+    private TimeSpan? GetExpiry(int? seconds)
+    {
+        if (seconds is null)
+        {
+            return null;
+        }
+        else
+        {
+            return TimeSpan.FromSeconds((double)seconds);
+        }
+    }
     #endregion
 
     #region Set Synchronous
 
+    ///<inheritdoc/> 
     public void Set<T>(string key, T? data, int? cacheTime = null) => SetInternal(key, data, cacheTime);
 
+    ///<inheritdoc/> 
     public void Set<T>(string key, T? data, TimeSpan? expiry = null) => SetInternal(key, data, expiry);
 
     #endregion
@@ -73,40 +84,63 @@ public partial class RedisCacheManager
 
     #region IAsync Enums
 
+    ///<inheritdoc/> 
     public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireTasksKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
     {
-        //await foreach (var item in acquireTasksKeyPair)
-        //{
-        //    var data = await item.Value();
-        //    if (data is not null)
-        //    {
-        //        await SetAsyncInternal<T>(item.Key, data, cacheTime, cancellationToken);
-        //    }
-        //}
-        var allPais = await acquireTasksKeyPair
-            .SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value()))
-            .Where(a => a.Value is not null)
-            .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
-            .ToArrayAsync();
-        await Redis.StringSetAsync(allPais);
+        // if we don't use timed caching, we can set all together in one go
+        if (cacheTime is null)
+        {
+            var allPais = await acquireTasksKeyPair
+                .SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value()))
+                .Where(a => a.Value is not null)
+                .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
+                .ToArrayAsync();
+            await Redis.StringSetAsync(allPais);
+        }
+        else
+        {
+            await acquireTasksKeyPair.SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value()))
+                .Where(a => a.Value is not null)
+                .ForEachAsync(a => SetAsyncInternal<T>(a.Key, a.Value, cacheTime, cancellationToken));
+        }
     }
+
+    ///<inheritdoc/> 
     public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
     {
-        var values = await acquireKeyPair
-            .SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value))
-            .Where(a => a.Value is not null)
-            .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
-            .ToArrayAsync();
-        await Redis.StringSetAsync(values);
-
+        // if we don't use timed caching, we can set all together in one go
+        if (cacheTime is null)
+        {
+            var values = await acquireKeyPair.SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value))
+                .Where(a => a.Value is not null)
+                .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
+                .ToArrayAsync();
+            await Redis.StringSetAsync(values);
+        }
+        else
+        {
+            await acquireKeyPair.SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value))
+                .Where(a => a.Value is not null)
+                .ForEachAsync(a => SetAsyncInternal<T>(a.Key, a.Value, cacheTime, cancellationToken));
+        }
     }
+
+    ///<inheritdoc/> 
     public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
     {
-        var values = await acquireKeyPair
-            .Where(a => a.Value is not null)
-            .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
-            .ToArrayAsync();
-        await Redis.StringSetAsync(values);
+        // if we don't use timed caching, we can set all together in one go
+        if (cacheTime is null)
+        {
+            var values = await acquireKeyPair.Where(a => a.Value is not null)
+                    .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
+                    .ToArrayAsync();
+            await Redis.StringSetAsync(values);
+        }
+        else
+        {
+            await acquireKeyPair.Where(a => a.Value is not null)
+                .ForEachAsync(a => SetAsyncInternal(a.Key, a.Value, cacheTime, cancellationToken))                ;
+        }
     }
 
     #endregion

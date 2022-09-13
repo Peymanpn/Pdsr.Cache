@@ -28,7 +28,7 @@ jobs:
     - name: Get current version
       run: |
         dotnet tool install --global Nito.ProjProps
-        echo "NEWTAG=v$(projprops --project src/Directory.Build.props)" >> $GITHUB_ENV
+        echo "NEWTAG=v$(projprops --project src/Directory.Build.props --name version --output-format SingleValueOnly)" >> $GITHUB_ENV
     - name: Build
       run: dotnet build --configuration Release -p:SignAssembly=True --no-restore
     - name: Make packages
@@ -42,4 +42,7 @@ jobs:
           **/*.snupkg
     - name: Publish packages
       if: env.NEWTAG != steps.existingtag.outputs.tag
-      run: dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
+      run: |
+        dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
+        git tag ${{ env.NEWTAG }}
+        git push --tags
