@@ -1,7 +1,7 @@
 <Project>
     <PropertyGroup>
-        <Version>3.1.8</Version>
-        <LangVersion>10.0</LangVersion>
+        <Version>3.2.0</Version>
+        <LangVersion>11.0</LangVersion>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <Description>Pdsr Cache helper library</Description>
@@ -57,6 +57,7 @@
 
     <PropertyGroup>
         <EnablePackageValidation>true</EnablePackageValidation>
-        <SupportedFrameworks>netstandard2.0;netstandard2.1;netcoreapp3.1;net5.0;net6.0</SupportedFrameworks>
+        <SupportedFrameworks>netstandard2.0;netstandard2.1</SupportedFrameworks>
+        <SupportedFramework>netstandard2.0</SupportedFramework>
     </PropertyGroup>
 </Project>

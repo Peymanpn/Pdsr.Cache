@@ -19,7 +19,10 @@ public class SqlCacheManager : ICacheManager
     public T? Get<T>(string key, Func<T?> acquire, int? cacheTime = null)
     {
         var dbValue = _cache.GetString(key);
-        if (!string.IsNullOrEmpty(dbValue)) return Deserialize<T>(dbValue);
+        if (dbValue is not null && !string.IsNullOrEmpty(dbValue))
+        {
+            return Deserialize<T>(dbValue);
+        }
         else
         {
             var newValue = acquire();
@@ -50,7 +53,7 @@ public class SqlCacheManager : ICacheManager
     public string Get(string key, Func<string> acquire, int? cacheTime = null)
     {
         var dbValue = _cache.GetString(key);
-        if (string.IsNullOrEmpty(dbValue))
+        if (dbValue is null || string.IsNullOrEmpty(dbValue))
         {
             var newValue = acquire();
             _cache.SetString(key, newValue, GetCacheEntryOptions(cacheTime));
@@ -131,12 +134,14 @@ public class SqlCacheManager : ICacheManager
 
     public async Task<byte[]?> GetAsync(string key, Func<Task<byte[]?>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
     {
-        byte[] dbValue = await _cache.GetAsync(key, cancellationToken);
+        byte[]? dbValue = await _cache.GetAsync(key, cancellationToken);
         if (dbValue == null)
         {
             var newValue = await acquire();
-            await _cache.SetAsync(key, newValue, GetCacheEntryOptions(cacheTime), cancellationToken);
-
+            if (newValue is not null)
+            {
+                await _cache.SetAsync(key, newValue, GetCacheEntryOptions(cacheTime), cancellationToken);
+            }
             return newValue;
         }
         else { return dbValue; }
@@ -266,7 +271,7 @@ public class SqlCacheManager : ICacheManager
         return JsonSerializer.Serialize(data);
     }
 
-    private T? Deserialize<T>(string value) => System.Text.Json.JsonSerializer.Deserialize<T>(value);
+    private T? Deserialize<T>(string? value) => value is null ? default : JsonSerializer.Deserialize<T>(value);
 
 
     public void Dispose()
