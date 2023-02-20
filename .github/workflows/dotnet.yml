@@ -25,14 +25,21 @@ jobs:
       run: dotnet restore
     - name: signing key
       run: echo ${{ secrets.SNKEY }} | base64 -d > key.snk
-    - name: Get current version
-      run: |
-        dotnet tool install --global Nito.ProjProps
-        echo "NEWTAG=v$(projprops --project src/Directory.Build.props --name version --output-format SingleValueOnly)" >> $GITHUB_ENV
+    # - name: Get current version
+    #   run: |
+    #     dotnet tool install --global Nito.ProjProps
+    #     echo "NEWTAG=v$(projprops --project src/Directory.Build.props --name version --output-format SingleValueOnly)" >> $GITHUB_ENV
     - name: Build
       run: dotnet build --configuration Release -p:SignAssembly=True --no-restore
     - name: Make packages
-      run: dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/
+      run: |
+        dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache
+        dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.InMemory
+        dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.NoCache
+        dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.Polly
+        dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.Redis
+        dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.SqlServer
+
     - name: Upload package artifacts
       uses: actions/upload-artifact@v2
       with:
@@ -41,8 +48,8 @@ jobs:
           **/*.nupkg
           **/*.snupkg
     - name: Publish packages
-      if: env.NEWTAG != steps.existingtag.outputs.tag
+      # if: env.NEWTAG != steps.existingtag.outputs.tag
       run: |
         dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
-        git tag ${{ env.NEWTAG }}
-        git push --tags
+        # git tag ${{ env.NEWTAG }}
+        # git push --tags
