@@ -1,6 +1,10 @@
+using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
 namespace Pdsr.Cache.InMemory;
 
-internal class CachedData : Dictionary<string, CacheDataItem>
+internal class CachedData : ConcurrentDictionary<string, CacheDataItem>
 {
 
 }
@@ -11,10 +15,11 @@ internal record CacheDataItem
 {
     public CacheDataItem() { }
 
-    public CacheDataItem(DateTimeOffset e, object d)
+    public CacheDataItem(DateTimeOffset e, string? d)
     {
-        expiry = e; data = d;
+        Expiry = e;
+        Data = d;
     }
-    public DateTimeOffset expiry { get; set; }
-    public object? data { get; set; }
+    public DateTimeOffset Expiry { get; set; }
+    public string? Data { get; set; }
 }

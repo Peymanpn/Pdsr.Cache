@@ -1,13 +1,15 @@
 using Pdsr.Cache.InMemory;
 using Pdsr.Cache.InMemory.Configurations;
+using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 
 namespace Pdsr.Cache
 {
     public class InMemoryCacheManager : ICacheManager
     {
-        private readonly CachedData _cache;
+        private readonly ConcurrentDictionary<string, CacheDataItem> _cache;
         private readonly InMemoryCacheConfig _inMemoryCacheConfig;
 
         internal InMemoryCacheManager(CachedData cache, InMemoryCacheConfig inMemoryCacheConfig)
@@ -19,12 +21,11 @@ namespace Pdsr.Cache
 
         private bool TryGetData<T>(string key, out T? data)
         {
-            // var d = _cache.Data.TryGetValue(key, out object value);
             var d = _cache.TryGetValue(key, out CacheDataItem? value);
-            if (d && value is not null && !IsExpired(value.expiry))
+            if (d && value is not null && value.Data is not null && !IsExpired(value.Expiry))
             {
-                data = (T?)value.data;
-                // EvictExpiredKeys();
+                data = Deserialize<T>(value.Data);
+
                 return true;
             }
             EvictExpiredKeys();
@@ -32,31 +33,24 @@ namespace Pdsr.Cache
             return false;
         }
 
+
+        private string Serialize<T>(T data) => JsonSerializer.Serialize(data);
+        private T? Deserialize<T>(string text) => JsonSerializer.Deserialize<T>(text);
+
         private void EvictExpiredKeys()
         {
-            //var lst = _cache.Keys;//.ToList();
-            //lst.ForEach(kv =>
-            //{
-            //    if (_cache.ContainsKey(kv)&& IsExpired(_cache[kv].expiry))
-            //    {
-            //        _cache.Remove(kv);
-            //    }
-            //});
-            object lstLock = new object();
-            //Monitor.Enter(lstLock);
             lock (_cache)
             {
                 string[] keys = new string[_cache.Keys.Count];
                 _cache.Keys.CopyTo(keys, 0);
                 foreach (var item in keys)
                 {
-                    if (_cache.ContainsKey(item) && IsExpired(_cache[item].expiry))
+                    if (_cache.ContainsKey(item) && IsExpired(_cache[item].Expiry))
                     {
-                        _cache.Remove(item);
+                        _cache.TryRemove(item, out CacheDataItem _);
                     }
                 }
             }
-            //Monitor.Exit(lstLock);
         }
 
         private void EvictExpiredKeysBg()
@@ -78,17 +72,14 @@ namespace Pdsr.Cache
                 throw new Exception($"Cache entries exceeded the max count {_inMemoryCacheConfig.MaxEnteriesCount}");
             if (cacheTime is null)
             {
-                // SetData<T>(key, data,cacheTime);
-                _cache.Add(key,
-                    //(DateTimeOffset.MaxValue, data)
-                    new CacheDataItem(DateTimeOffset.MaxValue, data)
+                _cache.TryAdd(key,
+                    new CacheDataItem(DateTimeOffset.MaxValue, Serialize(data))
                     );
             }
             else
             {
-                _cache.Add(key,
-                    // (GetExpireDate(cacheTime.Value), data)
-                    new CacheDataItem(GetExpireDate(cacheTime.Value), data)
+                _cache.TryAdd(key,
+                    new CacheDataItem(GetExpireDate(cacheTime.Value), Serialize(data))
                     );
             }
         }
@@ -175,19 +166,19 @@ namespace Pdsr.Cache
             return Task.CompletedTask;
         }
 
-        public bool IsSet(string key) => _cache.TryGetValue(key, out var data) && !IsExpired(data.expiry);
+        public bool IsSet(string key) => _cache.TryGetValue(key, out var data) && !IsExpired(data.Expiry);
 
         public Task<bool> IsSetAsync(string key, CancellationToken cancellationToken = default)
-            => Task.FromResult(_cache.TryGetValue(key, out var data) && !IsExpired(data.expiry));
+            => Task.FromResult(_cache.TryGetValue(key, out var data) && !IsExpired(data.Expiry));
 
         public void Remove(string key)
         {
-            _cache.Remove(key);
+            _cache.TryRemove(key, out CacheDataItem _);
         }
 
         public Task RemoveAsync(string key, CancellationToken cancellationToken = default)
         {
-            _cache.Remove(key);
+            _cache.TryRemove(key, out CacheDataItem _);
             return Task.CompletedTask;
         }
 
@@ -221,7 +212,7 @@ namespace Pdsr.Cache
         {
             if (_cache.TryGetValue(key, out var data))
             {
-                long ttl = (long)data.expiry.Subtract(DateTimeOffset.UtcNow).TotalSeconds;
+                long ttl = (long)data.Expiry.Subtract(DateTimeOffset.UtcNow).TotalSeconds;
                 return ttl;
             }
             return -1L;
