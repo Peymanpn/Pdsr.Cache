@@ -1,5 +1,8 @@
 # Pdsr Cache Helper
 
+
+[![NuGet version (Pdsr.Cache)](https://img.shields.io/nuget/v/Pdsr.Cache.svg?style=flat-square)](https://www.nuget.org/packages/Pdsr.Cache/)
+
 A helper library (wrapper) for caching with Redis, MSSQL, ...
 
 ## What is it?
@@ -19,7 +22,7 @@ you need to install the package, add to DI and then use it in services.
 
 
 ```csharp
-public class MyClass 
+public class MyClass
 {
     private readonly ICacheManager _cache;
     public MyClass(ICacheManager cache) => _cache = cache;
@@ -30,9 +33,9 @@ public class MyClass
             "some-key" , // cache key identifier
             async () => // Func<Task<T>> to produce something
             {
-                var model = new SomeModel(); // produce something time consuming 
+                var model = new SomeModel(); // produce something time consuming
                 return model;
-            }, 
+            },
             60, // cache time
             cancellationToken);
 
