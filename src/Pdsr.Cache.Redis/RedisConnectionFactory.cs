@@ -72,6 +72,9 @@ namespace Pdsr.Cache
                 {
                     rediConnectConfigs.ClientName = Assembly.GetCallingAssembly().GetName().Name;
                 }
+
+                rediConnectConfigs.User = redisConfiguration.User;
+                
             }
             if (endpoints == null)
             {

@@ -49,6 +49,11 @@ public interface IRedisConfiguration
     bool AbortOnConnectFail { get; set; }
 
     /// <summary>
+    /// Username
+    /// </summary>
+    string? User { get; set; }
+
+    /// <summary>
     /// Password for connecting to redis
     /// </summary>
     string? Password { get; set; }

@@ -52,6 +52,11 @@ public class RedisConfiguration : IRedisConfiguration
     public bool AbortOnConnectFail { get; set; }
 
     /// <summary>
+    /// User for connecting to redis
+    /// </summary>
+    public string? User { get; set; }
+
+    /// <summary>
     /// Password for connecting to redis
     /// </summary>
     public string? Password { get; set; }
