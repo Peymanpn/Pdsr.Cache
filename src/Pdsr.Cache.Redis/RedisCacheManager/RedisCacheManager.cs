@@ -192,14 +192,9 @@ public partial class RedisCacheManager : ICacheManager, IRedisCacheManager
     {
         get
         {
-            if (!string.IsNullOrEmpty(_redisConfiguration.Host) && _redisConfiguration.Port > 0)
-                return _redisConnectionFactory.Connection().GetServer($"{_redisConfiguration.Host}:{_redisConfiguration.Port}");
-            else if (_redisConfiguration.EndPoints != null && !string.IsNullOrEmpty(_redisConfiguration.EndPoints[0]))
-                return _redisConnectionFactory.Connection().GetServer(_redisConnectionFactory.Connection().GetEndPoints().ToList()[0]);
-            else throw new InvalidOperationException();
+            return _redisConnectionFactory.Connection().GetServer(_redisConnectionFactory.Connection().GetEndPoints().ToList()[0]);
         }
     }
-
 
     /// <inheritdoc/>
     public ISubscriber Subscriber { get => _redisConnectionFactory.Connection().GetSubscriber(); }

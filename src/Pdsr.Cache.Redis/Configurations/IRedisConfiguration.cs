@@ -6,18 +6,20 @@ public interface IRedisConfiguration
     /// Host and Port will be translated to Endpoints.
     /// if <see cref="EndPoints"/> provided, <see cref="Host"/> and <see cref="Port"/> will be ignored
     /// </summary>
+    [Obsolete("Use Endpoints instead", true)]
     string? Host { get; set; }
 
     /// <summary>
     /// Host and Port will be translated to Endpoints.
     /// if <see cref="EndPoints"/> provided, <see cref="Host"/> and <see cref="Port"/> will be ignored
     /// </summary>
+    [Obsolete("Use Endpoints instead", true)]
     int? Port { get; set; }
 
     /// <summary>
     /// Multiple Endpoints for Redis Servers
     /// </summary>
-    string[]? EndPoints { get; set; }
+    string[] EndPoints { get; set; }
 
 
     // public string Name { get; set; }
