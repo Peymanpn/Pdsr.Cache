@@ -2,9 +2,11 @@ name: .NET
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - "*"
   pull_request:
-    branches: [ main ]
+    branches:
+      - "*"
 env:
   CI: 'true'
   DOTNET_CLI_TELEMETRY_OPTOUT: 'true'
@@ -25,10 +27,6 @@ jobs:
       run: dotnet restore
     - name: signing key
       run: echo ${{ secrets.SNKEY }} | base64 -d > key.snk
-    # - name: Get current version
-    #   run: |
-    #     dotnet tool install --global Nito.ProjProps
-    #     echo "NEWTAG=v$(projprops --project src/Directory.Build.props --name version --output-format SingleValueOnly)" >> $GITHUB_ENV
     - name: Build
       run: dotnet build --configuration Release -p:SignAssembly=True --no-restore
     - name: Make packages
@@ -41,6 +39,7 @@ jobs:
         dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.SqlServer
 
     - name: Upload package artifacts
+      if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
       uses: actions/upload-artifact@v2
       with:
         name: nuget-packages
@@ -48,8 +47,6 @@ jobs:
           **/*.nupkg
           **/*.snupkg
     - name: Publish packages
-      # if: env.NEWTAG != steps.existingtag.outputs.tag
+      if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
       run: |
         dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
-        # git tag ${{ env.NEWTAG }}
-        # git push --tags
