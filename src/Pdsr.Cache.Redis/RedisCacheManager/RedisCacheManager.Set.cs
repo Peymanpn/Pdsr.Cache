@@ -69,11 +69,13 @@ public partial class RedisCacheManager
         return SetAsyncInternal(key, data, cacheTime, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public Task SetAsync<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default)
     {
         return SetAsyncInternal<T>(key, data, cacheTime, cancellationToken);
     }
 
+    /// <inheritdoc/>
     public Task SetAsync<T>(string key, T? data, TimeSpan? expiry, CancellationToken cancellationToken = default)
     {
         return SetAsyncInternal(key, data, expiry, cancellationToken);
@@ -90,12 +92,12 @@ public partial class RedisCacheManager
         // if we don't use timed caching, we can set all together in one go
         if (cacheTime is null)
         {
-            var allPais = await acquireTasksKeyPair
+            var allPairs = await acquireTasksKeyPair
                 .SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value()))
                 .Where(a => a.Value is not null)
                 .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
                 .ToArrayAsync();
-            await Redis.StringSetAsync(allPais);
+            await Redis.StringSetAsync(allPairs);
         }
         else
         {

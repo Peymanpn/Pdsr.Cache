@@ -1,10 +1,4 @@
 using Pdsr.Cache.Configurations;
-using Microsoft.Extensions.Options;
-using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 
 namespace Pdsr.Cache
 {
@@ -14,15 +8,12 @@ namespace Pdsr.Cache
 
         public RedisCacheManagerExtended(
             IRedisConnectionFactory redisConnectionFactory,
-            //IRedisConfiguration redisConfiguration
             RedisConfiguration redisConfigurationOptions
             ) : base(redisConfigurationOptions, redisConnectionFactory)
         {
             _redisConnectionFactory = redisConnectionFactory;
 
         }
-
-        // public IDatabase Redis => _redisConnectionFactory.Connection().GetDatabase();
 
         public IEnumerable<string> GetIEnum(string key, Func<IEnumerable<string>> acquire, int? cacheTime = null)
         {
