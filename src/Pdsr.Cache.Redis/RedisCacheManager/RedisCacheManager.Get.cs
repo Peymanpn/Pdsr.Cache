@@ -19,6 +19,7 @@ public partial class RedisCacheManager : ICacheManager, IRedisCacheManager
         else
             return (Redis.StringGet(key, demandReplica ? CommandFlags.PreferReplica : CommandFlags.None), false);
     }
+
     private async Task<(RedisValue value, bool disconnected)> GetStringAsync(RedisKey key, bool demandReplica = false)
     {
         if (!Redis.IsConnected(key))
