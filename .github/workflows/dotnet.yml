@@ -47,6 +47,6 @@ jobs:
           **/*.nupkg
           **/*.snupkg
     - name: Publish packages
-      if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.event.pull_request.base.ref == 'main'
+      if: github.event_name == 'pull_request' && github.event.pull_request.merged == true && github.ref == 'refs/heads/main'
       run: |
         dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
