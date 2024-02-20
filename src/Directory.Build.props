@@ -1,7 +1,7 @@
 <Project>
     <PropertyGroup>
-        <Version>3.3.1</Version>
-        <LangVersion>11.0</LangVersion>
+        <Version>3.5.0</Version>
+        <LangVersion>12.0</LangVersion>
         <Nullable>enable</Nullable>
         <ImplicitUsings>enable</ImplicitUsings>
         <Description>Pdsr Cache helper library</Description>
