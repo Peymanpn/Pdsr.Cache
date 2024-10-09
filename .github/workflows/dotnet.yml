@@ -39,13 +39,14 @@ jobs:
         dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.SqlServer
 
     - name: Upload package artifacts
-      uses: actions/upload-artifact@v3
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: actions/upload-artifact@v4
       with:
         name: nuget-packages
         path: |
           **/*.nupkg
           **/*.snupkg
-          - name: Publish packages
-        run: |
-          dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
+
+    - name: Publish packages
+      # if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      run: |
+        dotnet nuget push **/*.nupkg --source https://api.nuget.org/v3/index.json --skip-duplicate --api-key ${{ secrets.NUGET_API_KEY }}
