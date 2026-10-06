@@ -9,10 +9,10 @@
   </ItemGroup>
   
   <ItemGroup>
-    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="9.0.2" />
-    <PackageReference Include="StackExchange.Redis" Version="2.8.24" />
-    <PackageReference Include="System.Linq.Async" Version="6.0.1" />
-    <PackageReference Include="System.Text.Json" Version="9.0.2" />
+    <PackageReference Include="Microsoft.Bcl.AsyncInterfaces" Version="10.0.12" />
+    <PackageReference Include="StackExchange.Redis" Version="3.3.1" />
+    <PackageReference Include="System.Linq.AsyncEnumerable" Version="10.0.12" />
+    <PackageReference Include="System.Text.Json" Version="10.0.12" />
   </ItemGroup>
   
   <ItemGroup>

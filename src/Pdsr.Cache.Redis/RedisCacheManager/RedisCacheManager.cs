@@ -171,18 +171,15 @@ public partial class RedisCacheManager : ICacheManager, IRedisCacheManager
 
     #region Utilities
 
-    // TODO: use System.Text.Json instead of Newtonsoft
-
     /// <summary>
     /// Serialize using Newtonsoft Json.
     /// </summary>
     /// <typeparam name="T"></typeparam>
     /// <param name="data"></param>
     /// <returns></returns>
-    // private string Serialize<T>(T data) => JsonConvert.SerializeObject(data);
+
     private string Serialize<T>(T data) => System.Text.Json.JsonSerializer.Serialize<T>(data);
 
-    // private T Deserialize<T>(string value) => JsonConvert.DeserializeObject<T>(value);
     private T? Deserialize<T>(string value) => System.Text.Json.JsonSerializer.Deserialize<T>(value);
 
     #endregion
