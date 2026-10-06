@@ -1,24 +1,24 @@
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Pdsr.Cache;
-using System;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
-    public static class ServiceCollectionExtensions
+    /// <summary>
+    /// Registers <see cref="NoCacheManager"/>.
+    /// </summary>
+    public static class NoCacheServiceCollectionExtensions
     {
-
         /// <summary>
-        /// Registers <see cref="ICacheManager" /> as no <see cref="NoCacheManager" />for scenarios which redis or any other cache systems are not available/>/>
+        /// Registers <see cref="NoCacheManager"/> as the cache manager, for environments without a cache.
         /// </summary>
-        /// <param name="services"></param>
         public static IServiceCollection AddNoCacheManager(this IServiceCollection services)
         {
-            // services.AddSingleton<ICacheManager, NoCacheManager>();
-            services.AddTransient(f => new NoCacheManager())
-                .AddTransient<IAsyncCacheManager>(f => f.GetRequiredService<NoCacheManager>())
-                .AddTransient<ISyncCacheManager>(f => f.GetRequiredService<NoCacheManager>())
-                .AddSingleton<ICacheManager>(f => f.GetRequiredService<NoCacheManager>());
-            ;
+            if (services is null) throw new ArgumentNullException(nameof(services));
 
+            services.TryAddSingleton<NoCacheManager>();
+            services.TryAddSingleton<ICacheManager>(sp => sp.GetRequiredService<NoCacheManager>());
+            services.TryAddSingleton<IAsyncCacheManager>(sp => sp.GetRequiredService<NoCacheManager>());
+            services.TryAddSingleton<ISyncCacheManager>(sp => sp.GetRequiredService<NoCacheManager>());
             return services;
         }
     }

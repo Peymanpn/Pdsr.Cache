@@ -1,162 +1,116 @@
+using Pdsr.Cache.Internal;
+
 namespace Pdsr.Cache;
 
 public partial class RedisCacheManager
 {
     #region Internal
-    private Task SetAsyncInternal<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default)
+
+    /// <summary>
+    /// The single <c>SET</c> every synchronous write goes through. Not called for null values or non-positive expiries.
+    /// </summary>
+    protected virtual void SetCore<T>(string key, T data, TimeSpan? expiry)
+        => Redis.StringSet(key, Serialize(data), expiry, When.Always);
+
+    /// <summary>
+    /// The single <c>SET</c> every asynchronous write goes through. Not called for null values or non-positive expiries.
+    /// </summary>
+    protected virtual Task SetCoreAsync<T>(string key, T data, TimeSpan? expiry, CancellationToken cancellationToken)
+        => ExecuteAsync(db => db.StringSetAsync(key, Serialize(data), expiry, When.Always), cancellationToken);
+
+    /// <summary>
+    /// Converts a cache time in seconds to an expiry. Returns false when the value shouldn't be cached (zero or negative).
+    /// </summary>
+    private static bool TryGetExpiry(int? seconds, out TimeSpan? expiry)
     {
-        TimeSpan? expiry = GetExpiry(cacheTime);
-        return SetAsyncInternal<T>(key, data, expiry, cancellationToken);
+        expiry = seconds is null ? null : TimeSpan.FromSeconds(seconds.Value);
+        return IsCacheable(expiry);
     }
 
-    private Task SetAsyncInternal<T>(string key, T? data, TimeSpan? expiry = null, CancellationToken cancellationToken = default)
-    {
-        if (data is not null)
-            return Redis.StringSetAsync(key, Serialize(data), expiry, When.Always);
-        else
-            return Task.CompletedTask;
-    }
+    private static bool IsCacheable(TimeSpan? expiry) => expiry is null || expiry.Value > TimeSpan.Zero;
 
-    private void SetInternal<T>(string key, T? data, int? cacheTime = null)
-    {
-        TimeSpan? expiry = GetExpiry(cacheTime);
-        SetInternal<T>(key, data, expiry);
-    }
-
-    private void SetInternal<T>(string key, T? data, TimeSpan? expiry = null)
-    {
-        if (data is not null)
-            Redis.StringSetAsync(key, Serialize(data), expiry, When.Always);
-    }
-
-
-    private TimeSpan? GetExpiry(int? seconds)
-    {
-        if (seconds is null)
-        {
-            return null;
-        }
-        else
-        {
-            return TimeSpan.FromSeconds((double)seconds);
-        }
-    }
     #endregion
 
     #region Set Synchronous
 
-    ///<inheritdoc/> 
-    public void Set<T>(string key, T? data, int? cacheTime = null) => SetInternal(key, data, cacheTime);
+    ///<inheritdoc/>
+    public void Set<T>(string key, T? data, int? cacheTime = null)
+    {
+        if (data is not null && TryGetExpiry(cacheTime, out var expiry))
+            SetCore(key, data, expiry);
+    }
 
-    ///<inheritdoc/> 
-    public void Set<T>(string key, T? data, TimeSpan? expiry = null) => SetInternal(key, data, expiry);
+    ///<inheritdoc/>
+    public void Set<T>(string key, T? data, TimeSpan? expiry)
+    {
+        if (data is not null && IsCacheable(expiry))
+            SetCore(key, data, expiry);
+    }
 
     #endregion
 
-    #region Set Cache
-    /// <inheritdoc/>
-
-
-    /// <inheritdoc/>
-    public Task SetAsync(string key, byte[] data, int? cacheTime = null, CancellationToken cancellationToken = default(CancellationToken))
-    {
-        return SetAsyncInternal(key, data, cacheTime, cancellationToken);
-    }
-
-    /// <inheritdoc/>
-    public virtual Task SetAsync(string key, object data, int? cacheTime = null, CancellationToken cancellationToken = default)
-    {
-        return SetAsyncInternal(key, data, cacheTime, cancellationToken);
-    }
+    #region Set Asynchronous
 
     /// <inheritdoc/>
     public Task SetAsync<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default)
     {
-        return SetAsyncInternal<T>(key, data, cacheTime, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return data is not null && TryGetExpiry(cacheTime, out var expiry)
+            ? SetCoreAsync(key, data, expiry, cancellationToken)
+            : Task.CompletedTask;
     }
 
     /// <inheritdoc/>
     public Task SetAsync<T>(string key, T? data, TimeSpan? expiry, CancellationToken cancellationToken = default)
     {
-        return SetAsyncInternal(key, data, expiry, cancellationToken);
+        cancellationToken.ThrowIfCancellationRequested();
+        return data is not null && IsCacheable(expiry)
+            ? SetCoreAsync(key, data, expiry, cancellationToken)
+            : Task.CompletedTask;
     }
 
-    #endregion
-
-
-    #region IAsync Enums
-
-    ///<inheritdoc/> 
-    public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireTasksKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
+    ///<inheritdoc/>
+    public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
     {
-        // if we don't use timed caching, we can set all together in one go
-        if (cacheTime is null)
+        if (acquireKeyPair is null) throw new ArgumentNullException(nameof(acquireKeyPair));
+        if (!TryGetExpiry(cacheTime, out var expiry)) return;
+
+        var writes = new List<Task>();
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            var allPairs = new List<KeyValuePair<RedisKey, RedisValue>>();
-            await foreach (var a in acquireTasksKeyPair.WithCancellation(cancellationToken))
-            {
-                var value = await a.Value();
-                if (value is not null)
-                    allPairs.Add(new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(value)));
-            }
-            await Redis.StringSetAsync(allPairs.ToArray());
+            var value = await item.Value().ConfigureAwait(false);
+            if (value is not null) writes.Add(SetCoreAsync(item.Key, value, expiry, cancellationToken));
         }
-        else
-        {
-            await foreach (var a in acquireTasksKeyPair.WithCancellation(cancellationToken))
-            {
-                var value = await a.Value();
-                if (value is not null)
-                    await SetAsyncInternal<T>(a.Key, value, cacheTime, cancellationToken);
-            }
-        }
+        await Task.WhenAll(writes).WithCancellation(cancellationToken).ConfigureAwait(false);
     }
 
-    ///<inheritdoc/> 
+    ///<inheritdoc/>
     public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
     {
-        // if we don't use timed caching, we can set all together in one go
-        if (cacheTime is null)
+        if (acquireKeyPair is null) throw new ArgumentNullException(nameof(acquireKeyPair));
+        if (!TryGetExpiry(cacheTime, out var expiry)) return;
+
+        var writes = new List<Task>();
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            var values = new List<KeyValuePair<RedisKey, RedisValue>>();
-            await foreach (var a in acquireKeyPair.WithCancellation(cancellationToken))
-            {
-                var value = await a.Value;
-                if (value is not null)
-                    values.Add(new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(value)));
-            }
-            await Redis.StringSetAsync(values.ToArray());
+            var value = await item.Value.ConfigureAwait(false);
+            if (value is not null) writes.Add(SetCoreAsync(item.Key, value, expiry, cancellationToken));
         }
-        else
-        {
-            await foreach (var a in acquireKeyPair.WithCancellation(cancellationToken))
-            {
-                var value = await a.Value;
-                if (value is not null)
-                    await SetAsyncInternal<T>(a.Key, value, cacheTime, cancellationToken);
-            }
-        }
+        await Task.WhenAll(writes).WithCancellation(cancellationToken).ConfigureAwait(false);
     }
 
-    ///<inheritdoc/> 
+    ///<inheritdoc/>
     public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
     {
-        // if we don't use timed caching, we can set all together in one go
-        if (cacheTime is null)
+        if (acquireKeyPair is null) throw new ArgumentNullException(nameof(acquireKeyPair));
+        if (!TryGetExpiry(cacheTime, out var expiry)) return;
+
+        var writes = new List<Task>();
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            var values = await acquireKeyPair.Where(a => a.Value is not null)
-                    .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
-                    .ToArrayAsync(cancellationToken);
-            await Redis.StringSetAsync(values);
+            if (item.Value is not null) writes.Add(SetCoreAsync(item.Key, item.Value, expiry, cancellationToken));
         }
-        else
-        {
-            await foreach (var a in acquireKeyPair.WithCancellation(cancellationToken))
-            {
-                if (a.Value is not null)
-                    await SetAsyncInternal(a.Key, a.Value, cacheTime, cancellationToken);
-            }
-        }
+        await Task.WhenAll(writes).WithCancellation(cancellationToken).ConfigureAwait(false);
     }
 
     #endregion

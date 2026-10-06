@@ -2,188 +2,154 @@ using System.Runtime.CompilerServices;
 
 namespace Pdsr.Cache;
 
-public partial class RedisCacheManager : ICacheManager, IRedisCacheManager
+public partial class RedisCacheManager
 {
-    #region Internal
-    private T? GetFromRedisValue<T>(RedisValue redisValue)
+    #region Single read
+
+    /// <inheritdoc/>
+    public bool TryGet<T>(string key, out T? value)
     {
-        if (redisValue.HasValue)
-            return Deserialize<T>(redisValue.ToString());
-        else return default;
+        var result = TryGetCore<T>(key, CommandFlags.None);
+        value = result.Value;
+        return result.HasValue;
     }
 
-    private (RedisValue value, bool disconnected) GetString(RedisKey key, bool demandReplica = false)
-    {
-        if (!Redis.IsConnected(key, demandReplica ? CommandFlags.PreferReplica : CommandFlags.None))
-            return (RedisValue.Null, true);
-        else
-            return (Redis.StringGet(key, demandReplica ? CommandFlags.PreferReplica : CommandFlags.None), false);
-    }
+    /// <inheritdoc/>
+    public Task<CacheResult<T>> TryGetAsync<T>(string key, CancellationToken cancellationToken = default)
+        => TryGetCoreAsync<T>(key, CommandFlags.None, cancellationToken);
 
-    private async Task<(RedisValue value, bool disconnected)> GetStringAsync(RedisKey key, bool demandReplica = false)
-    {
-        if (!Redis.IsConnected(key))
-            return (RedisValue.Null, true);
-        else
-            return (await Redis.StringGetAsync(key, demandReplica ? CommandFlags.PreferReplica : CommandFlags.None), false);
-    }
+    /// <summary>
+    /// The single <c>GET</c> every synchronous read goes through.
+    /// </summary>
+    protected virtual CacheResult<T> TryGetCore<T>(string key, CommandFlags flags)
+        => ToResult<T>(Redis.StringGet(key, flags));
 
-    private async Task<T?> GetAsyncInternal<T>(string key, CancellationToken cancellationToken)
-    {
-        var data = await Redis.StringGetAsync(key);
-        if (data.HasValue) return Deserialize<T>(data.ToString());
-        return default;
-    }
+    /// <summary>
+    /// The single <c>GET</c> every asynchronous read goes through.
+    /// </summary>
+    protected virtual async Task<CacheResult<T>> TryGetCoreAsync<T>(string key, CommandFlags flags, CancellationToken cancellationToken)
+        => ToResult<T>(await ExecuteAsync(db => db.StringGetAsync(key, flags), cancellationToken).ConfigureAwait(false));
+
+    private static CacheResult<T> ToResult<T>(RedisValue value)
+        => value.IsNull ? CacheResult<T>.Miss : CacheResult<T>.Hit(Deserialize<T>(value));
+
+    private static CommandFlags ReadFlags(bool preferReplica) => preferReplica ? CommandFlags.PreferReplica : CommandFlags.None;
 
     #endregion
 
     #region Get Synchronous
-    ///<inheritdoc/> 
-    public T? Get<T>(string key, Func<T?> acquire, int? cacheTime = null)
-    {
-        var dbValue = GetString(key);
-        if (dbValue.disconnected) return acquire();
-        if (dbValue.value.HasValue)
-        {
-            var value = GetFromRedisValue<T>(dbValue.value);
-            if (value == null)
-            {
-                value = acquire();
-                Set(key, value, cacheTime);
-            }
-            return value;
-        }
-        else
-        {
-            var newValue = acquire();
-            if (newValue is null) return default;
-            Set(key, newValue, cacheTime);
-            return newValue;
-        }
-    }
-
-    ///<inheritdoc/> 
-    public T? Get<T>(string key)
-    {
-        return GetFromRedisValue<T>(GetString(key).value);
-    }
-
 
     ///<inheritdoc/>
-    public T? Get<T>(string key, bool preferReplica = true)
-    {
-        var (value, disconnected) = GetString(key, preferReplica);
-        if (disconnected) return default;
-        return GetFromRedisValue<T>(value);
-    }
+    public T? Get<T>(string key) => TryGetCore<T>(key, CommandFlags.None).Value;
 
+    ///<inheritdoc/>
+    public T? Get<T>(string key, bool preferReplica) => TryGetCore<T>(key, ReadFlags(preferReplica)).Value;
+
+    ///<inheritdoc/>
+    public T? Get<T>(string key, Func<T?> acquire, int? cacheTime = null)
+    {
+        if (acquire is null) throw new ArgumentNullException(nameof(acquire));
+
+        CacheResult<T> cached;
+        try
+        {
+            cached = TryGetCore<T>(key, CommandFlags.None);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            return acquire();
+        }
+        if (cached.HasValue && cached.Value is not null) return cached.Value;
+
+        var value = acquire();
+        try
+        {
+            Set(key, value, cacheTime);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            // The value is still correct; it just isn't cached this time.
+        }
+        return value;
+    }
 
     #endregion
 
-    #region Get Asynchronous 
-    ///<inheritdoc/> 
-    public async Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default)
-    {
-        var (value, disconnected) = await GetStringAsync(key);
-        if (disconnected) return default;
-        return GetFromRedisValue<T>(value);
-    }
+    #region Get Asynchronous
 
     ///<inheritdoc/>
-    public async Task<T?> GetAsync<T>(string key, bool preferReplica = true, CancellationToken cancellationToken = default)
-    {
-        var (value, disconnected) = await GetStringAsync(key, preferReplica);
-        if (disconnected) return default;
-        return GetFromRedisValue<T>(value);
-    }
-    ///<inheritdoc/> 
+    public async Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default)
+        => (await TryGetAsync<T>(key, cancellationToken).ConfigureAwait(false)).Value;
+
+    ///<inheritdoc/>
+    public async Task<T?> GetAsync<T>(string key, bool preferReplica, CancellationToken cancellationToken = default)
+        => (await TryGetCoreAsync<T>(key, ReadFlags(preferReplica), cancellationToken).ConfigureAwait(false)).Value;
+
+    ///<inheritdoc/>
     public async Task<T?> GetAsync<T>(string key, Func<Task<T?>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
     {
-        var (value, disconnected) = await GetStringAsync(key);
-        if (disconnected) return await acquire();
-        if (value.HasValue) return GetFromRedisValue<T>(value);
+        if (acquire is null) throw new ArgumentNullException(nameof(acquire));
 
-        var acquiredValue = await acquire();
-        await SetAsync(key, acquiredValue, cacheTime, cancellationToken);
-        return acquiredValue;
+        CacheResult<T> cached;
+        try
+        {
+            cached = await TryGetAsync<T>(key, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            return await acquire().ConfigureAwait(false);
+        }
+        if (cached.HasValue && cached.Value is not null) return cached.Value;
+
+        var value = await acquire().ConfigureAwait(false);
+        try
+        {
+            await SetAsync(key, value, cacheTime, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (IsUnavailable(ex))
+        {
+            // The value is still correct; it just isn't cached this time.
+        }
+        return value;
     }
 
     /// <inheritdoc/>
-    public virtual async Task<T?> GetAsync<T>(string key, Task<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
-        => await GetAsync<T>(key: key, acquire: () => acquire, cacheTime: cacheTime, cancellationToken: cancellationToken);
+    public Task<T?> GetAsync<T>(string key, Task<T?> acquireTask, int? cacheTime = null, CancellationToken cancellationToken = default)
+    {
+        if (acquireTask is null) throw new ArgumentNullException(nameof(acquireTask));
+        return GetAsync(key, () => acquireTask, cacheTime, cancellationToken);
+    }
 
     /// <inheritdoc/>
-    public virtual async Task<T?> GetAsync<T>(string key, Func<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
+    public Task<T?> GetAsync<T>(string key, Func<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
     {
-        if (!Redis.IsConnected(key)) return acquire();
-        var dbValue = await Redis.StringGetAsync(key);
-        if (dbValue.HasValue)
-        {
-            if (dbValue.IsNullOrEmpty) return default;
-            else
-                return Deserialize<T>(dbValue!);
-        }
-        else
-        {
-            T? newValue = acquire();
-            if (newValue is null) return default;
-            await SetAsync(key, newValue, cacheTime, cancellationToken);
-            return newValue;
-        }
+        if (acquire is null) throw new ArgumentNullException(nameof(acquire));
+        return GetAsync(key, () => Task.FromResult(acquire()), cacheTime, cancellationToken);
     }
 
-
-
-    public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await foreach (var item in acquireKeyPair)
-        {
-            if (await Redis.KeyExistsAsync(item.Key))
-            {
-                var results = await GetAsyncInternal<T>(item.Key, cancellationToken);
-                yield return results;
-            }
-            else
-            {
-                var data = item.Value;
-                await SetAsyncInternal(item.Key, data, cacheTime, cancellationToken);
-                yield return data;
-            }
-        }
-    }
-    public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await foreach (var item in acquireKeyPair)
-        {
-            if (await Redis.KeyExistsAsync(item.Key))
-            {
-                var results = await GetAsyncInternal<T>(item.Key, cancellationToken);
-                yield return results;
-            }
-            else
-            {
-                var data = await item.Value;
-                await SetAsyncInternal(item.Key, data, cacheTime, cancellationToken);
-                yield return data;
-            }
-        }
-    }
+    /// <inheritdoc/>
     public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var item in acquireKeyPair)
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+            yield return await GetAsync(item.Key, item.Value, cacheTime, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+            yield return await GetAsync(item.Key, item.Value, cacheTime, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc/>
+    public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
         {
-            if (await Redis.KeyExistsAsync(item.Key))
-            {
-                var results = await GetAsyncInternal<T>(item.Key, cancellationToken);
-                yield return results;
-            }
-            else
-            {
-                var data = await item.Value();
-                await SetAsyncInternal(item.Key, data, cacheTime, cancellationToken);
-                yield return data;
-            }
+            var value = item.Value;
+            yield return await GetAsync(item.Key, () => Task.FromResult(value), cacheTime, cancellationToken).ConfigureAwait(false);
         }
     }
+
     #endregion
 }
