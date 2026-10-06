@@ -3,148 +3,69 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Microsoft.Extensions.DependencyInjection;
 
-public static class ServiceCollectionExtensions
+/// <summary>
+/// Registers <see cref="RedisCacheManager"/>.
+/// </summary>
+public static class RedisServiceCollectionExtensions
 {
     /// <summary>
-    /// Registers Redis Cache Manager with minimum configurations
+    /// Registers the Redis cache manager for a single server.
     /// </summary>
-    /// <param name="services"></param>
-    /// <param name="host"></param>
-    /// <param name="port"></param>
-    /// <returns></returns>
+    /// <param name="services">The service collection</param>
+    /// <param name="host">Host name or IP address. IPv6 addresses may be given with or without brackets.</param>
+    /// <param name="port">Port</param>
     public static IServiceCollection AddRedisCacheManager(this IServiceCollection services, string host = "localhost", int port = 6379)
     {
-        services.TryAddSingleton<IRedisConfiguration>(f => new RedisConfiguration
-        {
-            EndPoints = new[] { $"{host}:{port}" }
-        });
-        RegisterRedisCacheManagerDependencyInjection(services: services);
-        return services;
-    }
-
-    public static IServiceCollection AddRedisCacheManager(this IServiceCollection services, Action<RedisConfiguration> setupRedis)
-    {
-        var config = new RedisConfiguration();
-        setupRedis(config);
-        services.AddSingleton<IRedisConfiguration>(config);
-        RegisterRedisCacheManagerDependencyInjection(services);
-        return services;
-    }
-
-
-    /// <summary>
-    /// Adds Redis Cache manager with <see cref="ICacheManager"/>
-    /// </summary>
-    /// <param name="services">The Microsoft.Extensions.DependencyInjection.IServiceCollection to add services to</param>
-    /// <param name="implementationFactory">implementation factory for RedisConfiguration</param>
-    public static void AddRedisCacheManager(
-        this IServiceCollection services,
-        Func<IServiceProvider, IRedisConfiguration>? implementationFactory = null)
-    {
-        if (implementationFactory is not null)
-        {
-            services.TryAddSingleton<IRedisConfiguration>(implementationFactory);
-        }
-        RegisterRedisCacheManagerDependencyInjection(services: services);
+        if (host is null) throw new ArgumentNullException(nameof(host));
+        return services.AddRedisCacheManager(new RedisConfiguration { EndPoints = [FormatEndPoint(host, port)] });
     }
 
     /// <summary>
-    /// Adds Redis Cache manager with <see cref="ICacheManager"/>
+    /// Registers the Redis cache manager, configured by <paramref name="configure"/>.
     /// </summary>
-    /// <param name="services">The Microsoft.Extensions.DependencyInjection.IServiceCollection to add services to</param>
-    /// <param name="redisConfiguration">Redis host configuration</param>
-    public static IServiceCollection AddRedisCacheManager(
-        this IServiceCollection services,
-        IRedisConfiguration redisConfiguration
-        )
+    public static IServiceCollection AddRedisCacheManager(this IServiceCollection services, Action<RedisConfiguration> configure)
     {
-        services.AddSingleton<IRedisConfiguration>(redisConfiguration);
-        // services.AddOptions<IRedisConfiguration>();
-        RegisterRedisCacheManagerDependencyInjection(services: services);
-        return services;
+        if (configure is null) throw new ArgumentNullException(nameof(configure));
+        var configuration = new RedisConfiguration();
+        configure(configuration);
+        return services.AddRedisCacheManager(configuration);
     }
-
-
 
     /// <summary>
-    /// Adds Redis Cache manager with <see cref="ICacheManager"/>
+    /// Registers the Redis cache manager with the given configuration.
     /// </summary>
-    /// <param name="services">The Microsoft.Extensions.DependencyInjection.IServiceCollection to add services to</param>
-    /// <param name="redisConfiguration">Redis cache configs.<see cref="IRedisConfiguration"/></param>
-    public static IServiceCollection AddRedisCacheManager(
-        this IServiceCollection services,
-        IRedisConfiguration redisConfiguration,
-        // bool registerAsDistributedCache = false,
-        ServiceLifetime serviceLifetime = ServiceLifetime.Singleton,
-        ServiceLifetime optionsLifetime = ServiceLifetime.Singleton
-        )
+    public static IServiceCollection AddRedisCacheManager(this IServiceCollection services, IRedisConfiguration redisConfiguration)
     {
-        RegisterRedisCacheManagerDependencyInjection(services: services, serviceLifetime: serviceLifetime, optionsLifetime: optionsLifetime);
-        services.AddSingleton<IRedisConfiguration>(redisConfiguration);
-        return services;
+        if (services is null) throw new ArgumentNullException(nameof(services));
+        if (redisConfiguration is null) throw new ArgumentNullException(nameof(redisConfiguration));
+        services.Replace(ServiceDescriptor.Singleton(redisConfiguration));
+        return RegisterServices(services);
     }
 
-    private static IServiceCollection RegisterRedisCacheManagerDependencyInjection(
-        IServiceCollection services,
-        ServiceLifetime serviceLifetime = ServiceLifetime.Singleton,
-        ServiceLifetime optionsLifetime = ServiceLifetime.Singleton)
+    /// <summary>
+    /// Registers the Redis cache manager, resolving its configuration from the container.
+    /// </summary>
+    public static IServiceCollection AddRedisCacheManager(this IServiceCollection services, Func<IServiceProvider, IRedisConfiguration> configurationFactory)
     {
-        if (services is null)
-        {
-            throw new ArgumentNullException(nameof(services));
-        }
+        if (services is null) throw new ArgumentNullException(nameof(services));
+        if (configurationFactory is null) throw new ArgumentNullException(nameof(configurationFactory));
+        services.Replace(ServiceDescriptor.Singleton(configurationFactory));
+        return RegisterServices(services);
+    }
 
-        switch (serviceLifetime)
-        {
-            case ServiceLifetime.Singleton:
-                services.AddSingleton<IRedisCacheManager>(f
-                    => new RedisCacheManager(
-                        f.GetRequiredService<IRedisConfiguration>(),
-                        f.GetRequiredService<IRedisConnectionFactory>())
-                    )
-                    .AddSingleton<IAsyncCacheManager>(f => f.GetRequiredService<IRedisCacheManager>())
-                    .AddSingleton<ISyncCacheManager>(f => f.GetRequiredService<IRedisCacheManager>())
-                    .AddSingleton<ICacheManager>(f => f.GetRequiredService<IRedisCacheManager>());
-                break;
-            case ServiceLifetime.Scoped:
-                services.AddScoped<IRedisCacheManager>(f
-                    => new RedisCacheManager(
-                        f.GetRequiredService<IRedisConfiguration>(),
-                        f.GetRequiredService<IRedisConnectionFactory>()
-                        )
-                    )
-                    .AddScoped<IAsyncCacheManager>(f => f.GetRequiredService<IRedisCacheManager>())
-                    .AddScoped<ISyncCacheManager>(f => f.GetRequiredService<IRedisCacheManager>())
-                    .AddScoped<ICacheManager>(f => f.GetRequiredService<IRedisCacheManager>());
-                break;
-            case ServiceLifetime.Transient:
-                services.AddTransient<IRedisCacheManager>(f
-                    => new RedisCacheManager(
-                        f.GetRequiredService<IRedisConfiguration>(),
-                        f.GetRequiredService<IRedisConnectionFactory>()
-                        )
-                    )
-                    .AddTransient<IAsyncCacheManager>(f => f.GetRequiredService<IRedisCacheManager>())
-                    .AddTransient<ISyncCacheManager>(f => f.GetRequiredService<IRedisCacheManager>())
-                    .AddTransient<ICacheManager>(f => f.GetRequiredService<IRedisCacheManager>());
-                break;
-            default:
-                break;
-        }
-        switch (optionsLifetime)
-        {
-            case ServiceLifetime.Singleton:
-                services.AddSingleton<IRedisConnectionFactory, RedisConnectionFactory>();
-                break;
-            case ServiceLifetime.Scoped:
-                services.AddScoped<IRedisConnectionFactory, RedisConnectionFactory>();
-                break;
-            case ServiceLifetime.Transient:
-                services.AddTransient<IRedisConnectionFactory, RedisConnectionFactory>();
-                break;
-            default:
-                break;
-        }
+    internal static string FormatEndPoint(string host, int port)
+        => host.IndexOf(':') >= 0 && !host.StartsWith("[", StringComparison.Ordinal) ? $"[{host}]:{port}" : $"{host}:{port}";
+
+    private static IServiceCollection RegisterServices(IServiceCollection services)
+    {
+        // One connection per application: the factory owns it and the container disposes it on shutdown.
+        services.TryAddSingleton<IRedisConnectionFactory>(sp => new RedisConnectionFactory(sp.GetRequiredService<IRedisConfiguration>()));
+        services.TryAddSingleton<IRedisCacheManager>(sp => new RedisCacheManager(
+            sp.GetRequiredService<IRedisConfiguration>(),
+            sp.GetRequiredService<IRedisConnectionFactory>()));
+        services.TryAddSingleton<ICacheManager>(sp => sp.GetRequiredService<IRedisCacheManager>());
+        services.TryAddSingleton<IAsyncCacheManager>(sp => sp.GetRequiredService<IRedisCacheManager>());
+        services.TryAddSingleton<ISyncCacheManager>(sp => sp.GetRequiredService<IRedisCacheManager>());
         return services;
     }
 }

@@ -2,130 +2,122 @@ using System.Runtime.CompilerServices;
 
 namespace Pdsr.Cache;
 
+/// <summary>
+/// An <see cref="ICacheManager"/> that caches nothing: every read misses and read-through calls always acquire.
+/// </summary>
 public class NoCacheManager : ICacheManager
 {
+    /// <inheritdoc/>
     public T? Get<T>(string key) => default;
-    public T? Get<T>(string key, Func<T?> acquire, int? cacheTime = null) => acquire();
 
-    public string Get(string key, Func<string> acquire, int? cacheTime = null) => acquire();
+    /// <inheritdoc/>
+    public bool TryGet<T>(string key, out T? value)
+    {
+        value = default;
+        return false;
+    }
 
-    public int Get(string key, Func<int> acquire, int? cacheTime = null) => acquire();
+    /// <inheritdoc/>
+    public T? Get<T>(string key, Func<T?> acquire, int? cacheTime = null)
+        => (acquire ?? throw new ArgumentNullException(nameof(acquire)))();
 
-    public long Get(string key, Func<long> acquire, int? cacheTime = null) => acquire();
-
-    public byte[] Get(string key, Func<byte[]> acquire, int? cacheTime = null) => acquire();
-
-    public Task<T?> GetAsync<T>(string key, Func<Task<T?>> acquire, int? cacheTime = null, CancellationToken cancellation = default) => acquire();
-
-    public Task<string> GetAsync(string key, Func<Task<string>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default) => acquire();
-
-    public Task<int> GetAsync(string key, Func<Task<int>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default) => acquire();
-
-    public Task<long> GetAsync(string key, Func<Task<long>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default) => acquire();
-
-    public Task<byte[]> GetAsync(string key, Func<Task<byte[]>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default) => acquire();
-
+    /// <inheritdoc/>
     public Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default) => Task.FromResult<T?>(default);
-    public Task<T?> GetAsync<T>(string key, Task<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default) => acquire;
-    public Task<T?> GetAsync<T>(string key, Func<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default) => Task.FromResult(acquire());
 
-    public void Set(string key, object data, int? cacheTime = null) { }
+    /// <inheritdoc/>
+    public Task<CacheResult<T>> TryGetAsync<T>(string key, CancellationToken cancellationToken = default)
+        => Task.FromResult(CacheResult<T>.Miss);
 
-    public void Set(string key, object data, TimeSpan? expiry = null) { }
+    /// <inheritdoc/>
+    public Task<T?> GetAsync<T>(string key, Func<Task<T?>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
+        => (acquire ?? throw new ArgumentNullException(nameof(acquire)))();
 
-    public void Set(string key, byte[] data, int? cacheTime = null) { }
+    /// <inheritdoc/>
+    public Task<T?> GetAsync<T>(string key, Task<T?> acquireTask, int? cacheTime = null, CancellationToken cancellationToken = default)
+        => acquireTask ?? throw new ArgumentNullException(nameof(acquireTask));
 
-    public void Set(string key, byte[] data, TimeSpan? expiry = null) { }
+    /// <inheritdoc/>
+    public Task<T?> GetAsync<T>(string key, Func<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
+        => Task.FromResult((acquire ?? throw new ArgumentNullException(nameof(acquire)))());
 
-    public Task SetAsync(string key, object data, TimeSpan? expiry = null, CancellationToken cancellation = default) => Task.CompletedTask;
-
-    public Task SetAsync(string key, object data, int? cacheTime = null, CancellationToken cancellation = default) => Task.CompletedTask;
-
-    public Task SetAsync(string key, byte[] data, int? cacheTime = null, CancellationToken cancellation = default) => Task.CompletedTask;
-
-    public Task SetAsync(string key, byte[] data, TimeSpan? cacheTime = null, CancellationToken cancellation = default) => Task.CompletedTask;
-
-    public bool IsSet(string key) => true;
-
-    public Task<bool> IsSetAsync(string key, CancellationToken cancellation = default) => Task.FromResult(false);
-
-    public void Remove(string key) { }
-
-    public Task RemoveAsync(string key, CancellationToken cancellation = default) => Task.CompletedTask;
-
-    public void RemoveByPattern(string pattern) { }
-
-    public Task RemoveByPatternAsync(string pattern, CancellationToken cancellation = default) => Task.CompletedTask;
-
-    public void Clear() { }
-
-    public Task ClearAsync(CancellationToken cancellation = default) => Task.CompletedTask;
-
-
-
-    public void Dispose() { }
-
-
-
-    public Task<TimeSpan?> GetItemTimeSpanToLiveAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult<TimeSpan?>(null);
-
-
-
-    public TimeSpan? GetItemTimeSpanToLive(string key) => null;
-    public Task<long> GetItemTimeToLiveAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(-1L);
-
-    public long GetItemTimeToLive(string key) => -1L;
-
-    public Task SetAsync<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-    public Task SetAsync<T>(string key, T? data, TimeSpan? expiry, CancellationToken cancellationToken = default) => Task.CompletedTask;
-
-    public void Set<T>(string key, T? value, int? cacheTime = null)
-    {
-
-    }
-
-    public void Set<T>(string key, T value, TimeSpan? expiry = null)
-    {
-
-    }
-
+    /// <inheritdoc/>
     public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var item in acquireKeyPair)
-        {
-            yield return await item.Value();
-        }
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+            yield return await item.Value().ConfigureAwait(false);
     }
 
+    /// <inheritdoc/>
     public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var item in acquireKeyPair)
-        {
-            yield return await item.Value;
-        }
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+            yield return await item.Value.ConfigureAwait(false);
     }
 
+    /// <inheritdoc/>
     public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
     {
-        await foreach (var item in acquireKeyPair)
-        {
+        await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
             yield return item.Value;
-        }
     }
 
-    public Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
-    {
-        return Task.CompletedTask;
-    }
+    /// <inheritdoc/>
+    public void Set<T>(string key, T? data, int? cacheTime = null) { }
 
-    public Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
-    {
-        return Task.CompletedTask;
-    }
+    /// <inheritdoc/>
+    public void Set<T>(string key, T? data, TimeSpan? expiry) { }
 
-    public Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
-    {
-        return Task.CompletedTask;
-    }
+    /// <inheritdoc/>
+    public Task SetAsync<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public Task SetAsync<T>(string key, T? data, TimeSpan? expiry, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public bool IsSet(string key) => false;
+
+    /// <inheritdoc/>
+    public Task<bool> IsSetAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(false);
+
+    /// <inheritdoc/>
+    public void Remove(string key) { }
+
+    /// <inheritdoc/>
+    public Task RemoveAsync(string key, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public void RemoveByPattern(string pattern) { }
+
+    /// <inheritdoc/>
+    public Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public void Clear() { }
+
+    /// <inheritdoc/>
+    public Task ClearAsync(CancellationToken cancellationToken = default) => Task.CompletedTask;
+
+    /// <inheritdoc/>
+    public TimeSpan? GetItemTimeSpanToLive(string key) => null;
+
+    /// <inheritdoc/>
+    public long GetItemTimeToLive(string key) => -1L;
+
+    /// <inheritdoc/>
+    public Task<TimeSpan?> GetItemTimeSpanToLiveAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult<TimeSpan?>(null);
+
+    /// <inheritdoc/>
+    public Task<long> GetItemTimeToLiveAsync(string key, CancellationToken cancellationToken = default) => Task.FromResult(-1L);
+
+    /// <inheritdoc/>
+    public void Dispose() => GC.SuppressFinalize(this);
 }

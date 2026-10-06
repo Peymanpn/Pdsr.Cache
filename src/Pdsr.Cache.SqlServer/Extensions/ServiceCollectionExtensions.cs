@@ -8,7 +8,7 @@ using System;
 
 namespace Microsoft.Extensions.DependencyInjection
 {
-    public static class ServiceCollectionExtensions
+    public static class SqlServerServiceCollectionExtensions
     {
         /// <summary>
         /// Registers IDistributed cache for sql server and it with <see cref="Pdsr.Cache.ICacheManager"/>

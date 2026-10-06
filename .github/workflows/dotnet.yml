@@ -32,12 +32,14 @@ jobs:
       run: echo ${{ secrets.SNKEY }} | base64 -d > key.snk
     - name: Build
       run: dotnet build --configuration Release -p:SignAssembly=True --no-restore
+    - name: Test
+      run: dotnet test --solution Pdsr.Cache.sln --configuration Release --no-build
+
     - name: Make packages
       run: |
         dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache
         dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.InMemory
         dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.NoCache
-        dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.Polly
         dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.Redis
         dotnet pack --no-build --no-restore --configuration Release --output ./artifacts/ src/Pdsr.Cache.SqlServer
 

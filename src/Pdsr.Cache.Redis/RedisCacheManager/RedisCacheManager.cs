@@ -1,213 +1,112 @@
 using Pdsr.Cache.Configurations;
+using Pdsr.Cache.Internal;
+using StackExchange.Redis.KeyspaceIsolation;
+using System.Text.Json;
 
 namespace Pdsr.Cache;
 
-public partial class RedisCacheManager : ICacheManager, IRedisCacheManager
+/// <summary>
+/// <see cref="ICacheManager"/> backed by Redis. Values are stored as JSON strings.
+/// </summary>
+/// <remarks>
+/// When Redis is unreachable, reads, writes and existence checks throw
+/// (<see cref="RedisConnectionException"/> or <see cref="RedisTimeoutException"/>) rather than reporting a miss.
+/// The read-through <c>Get</c>/<c>GetAsync</c> overloads that take an <c>acquire</c> delegate instead return
+/// the acquired value without caching it.
+/// The connection is owned by <see cref="IRedisConnectionFactory"/>; disposing the manager leaves it open.
+/// </remarks>
+public partial class RedisCacheManager : IRedisCacheManager
 {
-    private readonly IRedisConnectionFactory _redisConnectionFactory;
+    private readonly IRedisConnectionFactory _connectionFactory;
+    private readonly IRedisConfiguration _configuration;
+    private readonly string _keyPrefix;
 
-    public RedisCacheManager(
-        IRedisConfiguration redisConfigurationOptions,
-        IRedisConnectionFactory redisConnectionFactory
-        )
+    /// <summary>
+    /// Creates a cache manager over a shared connection.
+    /// </summary>
+    public RedisCacheManager(IRedisConfiguration redisConfiguration, IRedisConnectionFactory redisConnectionFactory)
     {
-        _redisConnectionFactory = redisConnectionFactory;
-        _redisConfiguration = redisConfigurationOptions;
+        _configuration = redisConfiguration ?? throw new ArgumentNullException(nameof(redisConfiguration));
+        _connectionFactory = redisConnectionFactory ?? throw new ArgumentNullException(nameof(redisConnectionFactory));
+        _keyPrefix = redisConfiguration.KeyPrefix ?? string.Empty;
     }
 
-    private readonly IRedisConfiguration _redisConfiguration;
-
-    ///<inheritdoc/> 
-    public IDatabase Redis => _redisConnectionFactory.Connection().GetDatabase();
+    ///<inheritdoc/>
+    public IDatabase Redis => Scope(_connectionFactory.Connection());
 
     /// <inheritdoc/>
-    public bool IsSet(string key) => Redis.IsConnected(key) && Redis.KeyExists(key);
+    public ISubscriber Subscriber => _connectionFactory.Connection().GetSubscriber();
 
     /// <inheritdoc/>
-    public async Task<bool> IsSetAsync(string key, CancellationToken cancellation = default) => Redis.IsConnected(key) && await Redis.KeyExistsAsync(key);
+    public bool IsSet(string key) => Redis.KeyExists(key);
 
     /// <inheritdoc/>
-    public void Remove(string key)
-    {
-        Redis.KeyDelete(key);
-    }
+    public Task<bool> IsSetAsync(string key, CancellationToken cancellationToken = default)
+        => ExecuteAsync(db => db.KeyExistsAsync(key), cancellationToken);
 
     /// <inheritdoc/>
-    public async Task RemoveAsync(string key, CancellationToken cancellation = default)
-    {
-        await Redis.KeyDeleteAsync(key);
-    }
+    public void Remove(string key) => Redis.KeyDelete(key);
 
     /// <inheritdoc/>
-    public void RemoveByPattern(string pattern)
-    {
-        var keys = Server.Keys(pattern: pattern);
-        Redis.KeyDelete(keys.ToArray());
-    }
-
-    /// <inheritdoc/>
-    public async Task RemoveByPatternAsync(string pattern, CancellationToken cancellation = default)
-    {
-        //do
-        //{
-        var keys = Server.KeysAsync(pattern: pattern, pageSize: 1);
-
-        await foreach (var key in keys)
-        {
-            await Redis.KeyDeleteAsync(key);
-        }
-        //} while (Server.Keys(pattern: pattern).Any());
-    }
-
-    /// <inheritdoc/>
-    public void Clear() => Server.FlushDatabase();
-
-    /// <inheritdoc/>
-    public Task ClearAsync(CancellationToken cancellation = default) => Server.FlushDatabaseAsync();
+    public Task RemoveAsync(string key, CancellationToken cancellationToken = default)
+        => ExecuteAsync(db => db.KeyDeleteAsync(key), cancellationToken);
 
     /// <inheritdoc/>
     public TimeSpan? GetItemTimeSpanToLive(string key) => Redis.KeyTimeToLive(key);
+
     /// <inheritdoc/>
-    public long GetItemTimeToLive(string key)
-    {
-        var ttl = Redis.KeyTimeToLive(key);
-        return ttl.HasValue ? (long)ttl.Value.TotalSeconds : -1;
-    }
+    public long GetItemTimeToLive(string key) => ToSeconds(GetItemTimeSpanToLive(key));
 
     /// <inheritdoc/>
     public Task<TimeSpan?> GetItemTimeSpanToLiveAsync(string key, CancellationToken cancellationToken = default)
-        => Redis.KeyTimeToLiveAsync(key);
-
+        => ExecuteAsync(db => db.KeyTimeToLiveAsync(key), cancellationToken);
 
     /// <inheritdoc/>
     public async Task<long> GetItemTimeToLiveAsync(string key, CancellationToken cancellationToken = default)
-    {
-        var ttl = await Redis.KeyTimeToLiveAsync(key);
-        return ttl.HasValue ? (long)ttl.Value.TotalSeconds : -1;
-    }
+        => ToSeconds(await GetItemTimeSpanToLiveAsync(key, cancellationToken).ConfigureAwait(false));
 
-    // Set related methods
-    #region Set
-
-    /// <inheritdoc/>
-    public async Task<IEnumerable<string>> GetSetAsync(string setKeyName, CancellationToken cancellationToken = default)
-    {
-        var smemebers = await Redis.SetMembersAsync(setKeyName);
-        return smemebers.Select(c => c.ToString());
-    }
-
-    /// <inheritdoc/>
-    public async Task<IEnumerable<T?>> GetSetItemsAsync<T>(string setKeyName, string? cacheItemKeyPrefix = null, CancellationToken cancellationToken = default)
-    {
-        var smemebers = await Redis.SetMembersAsync(setKeyName);
-        List<string> keyList = smemebers.Select(c => cacheItemKeyPrefix + c).ToList();
-        List<T?> objects = new List<T?>(keyList.Count);
-        for (int i = 0; i < keyList.Count; i++)
-        {
-            objects[i] = await GetAsync<T>(keyList[i], cancellationToken: cancellationToken);
-        }
-        return objects;
-    }
-
-    /// <inheritdoc/>
-    public async Task AddToSetAsync<T>(string setKeyName, string key, T value, string? cacheItemKeyPrefix = null, int? cacheTime = null, CancellationToken cancellationToken = default)
-
-    {
-        await Redis.SetAddAsync(setKeyName, key);
-        await SetAsync(cacheItemKeyPrefix + key, value, cacheTime, cancellationToken);
-    }
-
-    /// <inheritdoc/>
-    public Task RemoveFromSetItemAsync(string setKeyName, string keyName, CancellationToken cancellationToken = default)
-    {
-        return Redis.SetRemoveAsync(setKeyName, keyName);
-    }
-
-    /// <inheritdoc/>
-    public Task<long> GetSetLength(string setKeyName, CancellationToken cancellationToken = default)
-    {
-        return Redis.SetLengthAsync(setKeyName);
-    }
-
-    #endregion
-
-
-    #region IDisposable Support
-
-    private bool disposedValue = false; // To detect redundant calls
-
-    protected virtual void Dispose(bool disposing)
-    {
-        if (!disposedValue)
-        {
-            if (disposing)
-            {
-                _redisConnectionFactory.Connection().Dispose();
-                // TODO: dispose managed state (managed objects).
-            }
-
-            // TODO: free unmanaged resources (unmanaged objects) and override a finalizer below.
-            // TODO: set large fields to null.
-
-            disposedValue = true;
-        }
-    }
-
-    // TODO: override a finalizer only if Dispose(bool disposing) above has code to free unmanaged resources.
-    // ~SqlCacheManager() {
-    //   // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
-    //   Dispose(false);
-    // }
-
-    // This code added to correctly implement the disposable pattern.
+    /// <summary>
+    /// The manager doesn't own the connection, so this is a no-op; dispose the <see cref="IRedisConnectionFactory"/> instead.
+    /// </summary>
     public void Dispose()
     {
-        // Do not change this code. Put cleanup code in Dispose(bool disposing) above.
         Dispose(true);
-        // TODO: uncomment the following line if the finalizer is overridden above.
-        // GC.SuppressFinalize(this);
+        GC.SuppressFinalize(this);
     }
-    #endregion
+
+    /// <summary>
+    /// Override to release resources owned by a derived class.
+    /// </summary>
+    protected virtual void Dispose(bool disposing)
+    {
+    }
 
     #region Utilities
 
-    /// <summary>
-    /// Serialize using Newtonsoft Json.
-    /// </summary>
-    /// <typeparam name="T"></typeparam>
-    /// <param name="data"></param>
-    /// <returns></returns>
+    private IDatabase Scope(IConnectionMultiplexer connection)
+    {
+        var database = connection.GetDatabase(_configuration.Database);
+        return _keyPrefix.Length == 0 ? database : database.WithKeyPrefix(_keyPrefix);
+    }
 
-    private string Serialize<T>(T data) => System.Text.Json.JsonSerializer.Serialize<T>(data);
+    private async Task<IDatabase> DatabaseAsync(CancellationToken cancellationToken)
+        => Scope(await _connectionFactory.ConnectionAsync(cancellationToken).ConfigureAwait(false));
 
-    private T? Deserialize<T>(string value) => System.Text.Json.JsonSerializer.Deserialize<T>(value);
+    private async Task<TResult> ExecuteAsync<TResult>(Func<IDatabase, Task<TResult>> command, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        var database = await DatabaseAsync(cancellationToken).ConfigureAwait(false);
+        return await command(database).WithCancellation(cancellationToken).ConfigureAwait(false);
+    }
+
+    private static long ToSeconds(TimeSpan? ttl) => ttl.HasValue ? (long)ttl.Value.TotalSeconds : -1;
+
+    private static string Serialize<T>(T data) => JsonSerializer.Serialize(data);
+
+    private static T? Deserialize<T>(RedisValue value) => JsonSerializer.Deserialize<T>((string)value!);
+
+    private static bool IsUnavailable(Exception exception)
+        => exception is RedisConnectionException or RedisTimeoutException;
 
     #endregion
-
-    /// <inheritdoc/>
-    public IServer Server
-    {
-        get
-        {
-            return _redisConnectionFactory.Connection().GetServer(_redisConnectionFactory.Connection().GetEndPoints().ToList()[0]);
-        }
-    }
-
-    /// <inheritdoc/>
-    public ISubscriber Subscriber { get => _redisConnectionFactory.Connection().GetSubscriber(); }
-
-    /// <inheritdoc/>
-    public IEnumerable<string> Keys => Server.Keys().Select(c => c.ToString());
-
-    /// <inheritdoc/>
-    public IEnumerable<string> GetKeysForUser(string subjectId)
-    {
-        return GetKeysForUserByPrefix(subjectId);
-    }
-
-    /// <inheritdoc/>
-    public IEnumerable<string> GetKeysForUserByPrefix(string subjectId, string prefix = "????:")
-    {
-        return Server.Keys(pattern: $"{prefix}{subjectId}:*").Select(c => c.ToString());
-    }
 }

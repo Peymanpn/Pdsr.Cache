@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" Version="10.0.12" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.10.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Pdsr.Cache.InMemory\Pdsr.Cache.InMemory.csproj" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\Shared\*.cs" LinkBase="Shared" Exclude="..\Shared\FakeRedis.cs" />
+  </ItemGroup>
+</Project>

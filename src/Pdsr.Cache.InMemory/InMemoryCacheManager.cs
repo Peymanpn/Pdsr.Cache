@@ -1,328 +1,321 @@
-using Pdsr.Cache.InMemory;
 using Pdsr.Cache.InMemory.Configurations;
+using Pdsr.Cache.InMemory.Internal;
 using System.Collections.Concurrent;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 
 namespace Pdsr.Cache
 {
+    /// <summary>
+    /// <see cref="ICacheManager"/> held in process memory. Values are stored as JSON, so reads return copies.
+    /// Patterns use Redis glob syntax.
+    /// </summary>
     public class InMemoryCacheManager : ICacheManager
     {
-        private readonly ConcurrentDictionary<string, CacheDataItem> _cache;
-        private readonly InMemoryCacheConfig _inMemoryCacheConfig;
+        private readonly ConcurrentDictionary<string, Entry> _cache = new(StringComparer.Ordinal);
+        private readonly InMemoryCacheConfig _config;
+        private readonly TimeProvider _timeProvider;
 
-        internal InMemoryCacheManager(CachedData cache, InMemoryCacheConfig inMemoryCacheConfig)
+        /// <summary>
+        /// Creates an empty cache.
+        /// </summary>
+        /// <param name="config">Settings</param>
+        /// <param name="timeProvider">Clock used for expiry; defaults to the system clock</param>
+        public InMemoryCacheManager(InMemoryCacheConfig config, TimeProvider? timeProvider = null)
         {
-            _cache = cache;
-            _inMemoryCacheConfig = inMemoryCacheConfig;
+            _config = config ?? throw new ArgumentNullException(nameof(config));
+            _timeProvider = timeProvider ?? TimeProvider.System;
         }
 
+        /// <summary>
+        /// Number of entries currently stored, including expired ones not yet evicted.
+        /// </summary>
+        public int Count => _cache.Count;
 
-        private bool TryGetData<T>(string key, out T? data)
+        #region Reads
+
+        /// <inheritdoc/>
+        public bool TryGet<T>(string key, out T? value)
         {
-            var d = _cache.TryGetValue(key, out CacheDataItem? value);
-            if (d && value is not null && value.Data is not null && !IsExpired(value.Expiry))
+            if (TryGetLiveEntry(key, out var entry))
             {
-                data = Deserialize<T>(value.Data);
-
+                value = JsonSerializer.Deserialize<T>(entry.Data);
                 return true;
             }
-            EvictExpiredKeys();
-            data = default;
+            value = default;
             return false;
         }
 
-
-        private string Serialize<T>(T data) => JsonSerializer.Serialize(data);
-        private T? Deserialize<T>(string text) => JsonSerializer.Deserialize<T>(text);
-
-        private void EvictExpiredKeys()
+        /// <inheritdoc/>
+        public Task<CacheResult<T>> TryGetAsync<T>(string key, CancellationToken cancellationToken = default)
         {
-            lock (_cache)
-            {
-                string[] keys = new string[_cache.Keys.Count];
-                _cache.Keys.CopyTo(keys, 0);
-                foreach (var item in keys)
-                {
-                    if (_cache.ContainsKey(item) && IsExpired(_cache[item].Expiry))
-                    {
-                        _cache.TryRemove(item, out CacheDataItem _);
-                    }
-                }
-            }
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(TryGet<T>(key, out var value) ? CacheResult<T>.Hit(value) : CacheResult<T>.Miss);
         }
 
-        private void EvictExpiredKeysBg()
-        {
-            Task evictTask = Task.Run(() =>
-              {
-                  EvictExpiredKeys();
-              });
-            if (evictTask.Status == TaskStatus.WaitingForActivation)
-                evictTask.Start();
+        /// <inheritdoc/>
+        public T? Get<T>(string key) => TryGet<T>(key, out var value) ? value : default;
 
+        /// <inheritdoc/>
+        public Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Get<T>(key));
         }
 
-
-        private void SetData<T>(string key, T? data, int? cacheTime = null)
-        {
-            if (data is null) return;
-            if (_cache.Count > _inMemoryCacheConfig.MaxEnteriesCount)
-                throw new Exception($"Cache entries exceeded the max count {_inMemoryCacheConfig.MaxEnteriesCount}");
-            if (cacheTime is null)
-            {
-                _cache.TryAdd(key,
-                    new CacheDataItem(DateTimeOffset.MaxValue, Serialize(data))
-                    );
-            }
-            else
-            {
-                _cache.TryAdd(key,
-                    new CacheDataItem(GetExpireDate(cacheTime.Value), Serialize(data))
-                    );
-            }
-        }
-
-        private DateTimeOffset GetExpireDate(int cacheTime) => DateTimeOffset.UtcNow.AddSeconds(cacheTime);
-
-        private bool IsExpired(DateTimeOffset date) => DateTimeOffset.UtcNow > date;
-
+        /// <inheritdoc/>
         public T? Get<T>(string key, Func<T?> acquire, int? cacheTime = null)
         {
-            if (TryGetData<T>(key, out var data))
-            {
-                return data;
-            }
-            else
-            {
-                SetData<T>(key, acquire(), cacheTime);
-                return Get<T>(key, acquire, cacheTime);
-            }
-        }
+            if (acquire is null) throw new ArgumentNullException(nameof(acquire));
+            if (TryGet<T>(key, out var cached) && cached is not null) return cached;
 
-        public T? Get<T>(string key)
-        {
-            TryGetData(key, out T? value);
+            var value = acquire();
+            Set(key, value, cacheTime);
             return value;
         }
 
+        /// <inheritdoc/>
         public async Task<T?> GetAsync<T>(string key, Func<Task<T?>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
         {
-            if (TryGetData<T>(key, out var data))
-            {
-                return data;
-            }
-            else
-            {
-                SetData<T>(key, await acquire(), cacheTime);
-                return await GetAsync<T>(key, acquire, cacheTime, cancellationToken);
-            }
+            if (acquire is null) throw new ArgumentNullException(nameof(acquire));
+            cancellationToken.ThrowIfCancellationRequested();
+            if (TryGet<T>(key, out var cached) && cached is not null) return cached;
+
+            var value = await acquire().ConfigureAwait(false);
+            Set(key, value, cacheTime);
+            return value;
         }
 
-        public Task<T?> GetAsync<T>(string key, Task<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
+        /// <inheritdoc/>
+        public Task<T?> GetAsync<T>(string key, Task<T?> acquireTask, int? cacheTime = null, CancellationToken cancellationToken = default)
         {
-            return GetAsync<T>(key, () => acquire, cacheTime, cancellationToken);
+            if (acquireTask is null) throw new ArgumentNullException(nameof(acquireTask));
+            return GetAsync(key, () => acquireTask, cacheTime, cancellationToken);
         }
 
+        /// <inheritdoc/>
         public Task<T?> GetAsync<T>(string key, Func<T?> acquire, int? cacheTime = null, CancellationToken cancellationToken = default)
         {
-            var hasData = TryGetData<T>(key, out T? data);
-            if (hasData) return Task.FromResult(data);
-            else
+            if (acquire is null) throw new ArgumentNullException(nameof(acquire));
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(Get(key, acquire, cacheTime));
+        }
+
+        /// <inheritdoc/>
+        public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+                yield return await GetAsync(item.Key, item.Value, cacheTime, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+                yield return await GetAsync(item.Key, item.Value, cacheTime, cancellationToken).ConfigureAwait(false);
+        }
+
+        /// <inheritdoc/>
+        public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        {
+            await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
             {
-                T? results = acquire();
-                if (results is null) return Task.FromResult<T?>(default);
-                SetData<T>(key, results, cacheTime);
-                return Task.FromResult<T?>(results);
+                var value = item.Value;
+                yield return Get(item.Key, () => value, cacheTime);
             }
         }
 
-        public Task<T?> GetAsync<T>(string key, CancellationToken cancellationToken = default)
-        {
-            TryGetData<T>(key, out T? value);
-            return Task.FromResult(value);
-        }
+        /// <inheritdoc/>
+        public bool IsSet(string key) => TryGetLiveEntry(key, out _);
 
-        public void Set(string key, object data, int? cacheTime = null)
-        {
-            SetData(key, data, cacheTime);
-        }
-
-        public void Set(string key, byte[] data, int? cacheTime = null)
-        {
-            SetData(key, data, cacheTime);
-        }
-
-        public Task SetAsync(string key, object data, int? cacheTime = null, CancellationToken cancellationToken = default)
-        {
-            SetData(key, data, cacheTime);
-            return Task.CompletedTask;
-        }
-
-        public Task SetAsync(string key, byte[] data, int? cacheTime = null, CancellationToken cancellationToken = default)
-        {
-            SetData(key, data, cacheTime);
-            return Task.CompletedTask;
-        }
-
-        public bool IsSet(string key) => _cache.TryGetValue(key, out var data) && !IsExpired(data.Expiry);
-
+        /// <inheritdoc/>
         public Task<bool> IsSetAsync(string key, CancellationToken cancellationToken = default)
-            => Task.FromResult(_cache.TryGetValue(key, out var data) && !IsExpired(data.Expiry));
-
-        public void Remove(string key)
         {
-            _cache.TryRemove(key, out CacheDataItem _);
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(IsSet(key));
         }
 
+        #endregion
+
+        #region Writes
+
+        /// <inheritdoc/>
+        public void Set<T>(string key, T? data, int? cacheTime = null)
+            => Set(key, data, cacheTime is null ? null : TimeSpan.FromSeconds(cacheTime.Value));
+
+        /// <inheritdoc/>
+        public void Set<T>(string key, T? data, TimeSpan? expiry)
+        {
+            if (key is null) throw new ArgumentNullException(nameof(key));
+            if (data is null) return;
+            if (expiry is { } ttl && ttl <= TimeSpan.Zero) return;
+            if (!HasRoomFor(key)) return;
+
+            var entry = new Entry(JsonSerializer.Serialize(data), expiry is null ? null : _timeProvider.GetUtcNow() + expiry.Value);
+            _cache[key] = entry;
+        }
+
+        /// <inheritdoc/>
+        public Task SetAsync<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Set(key, data, cacheTime);
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc/>
+        public Task SetAsync<T>(string key, T? data, TimeSpan? expiry, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            Set(key, data, expiry);
+            return Task.CompletedTask;
+        }
+
+        /// <inheritdoc/>
+        public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+                Set(item.Key, await item.Value().ConfigureAwait(false), cacheTime);
+        }
+
+        /// <inheritdoc/>
+        public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+                Set(item.Key, await item.Value.ConfigureAwait(false), cacheTime);
+        }
+
+        /// <inheritdoc/>
+        public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await foreach (var item in acquireKeyPair.WithCancellation(cancellationToken).ConfigureAwait(false))
+                Set(item.Key, item.Value, cacheTime);
+        }
+
+        #endregion
+
+        #region Removal
+
+        /// <inheritdoc/>
+        public void Remove(string key) => _cache.TryRemove(key, out _);
+
+        /// <inheritdoc/>
         public Task RemoveAsync(string key, CancellationToken cancellationToken = default)
         {
-            _cache.TryRemove(key, out CacheDataItem _);
+            cancellationToken.ThrowIfCancellationRequested();
+            Remove(key);
             return Task.CompletedTask;
         }
 
+        /// <summary>
+        /// Removes every key matching the Redis-style glob <paramref name="pattern"/>.
+        /// </summary>
         public void RemoveByPattern(string pattern)
         {
-            var keys = _cache.Keys.Where(k => Regex.IsMatch(k, pattern));
-            foreach (var key in keys) Remove(key);
+            if (pattern is null) throw new ArgumentNullException(nameof(pattern));
+            var regex = Glob.ToRegex(pattern);
+            foreach (var key in _cache.Keys)
+            {
+                if (regex.IsMatch(key)) _cache.TryRemove(key, out _);
+            }
         }
 
+        /// <inheritdoc cref="RemoveByPattern(string)"/>
         public Task RemoveByPatternAsync(string pattern, CancellationToken cancellationToken = default)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             RemoveByPattern(pattern);
             return Task.CompletedTask;
         }
 
+        /// <inheritdoc/>
         public void Clear() => _cache.Clear();
 
+        /// <inheritdoc/>
         public Task ClearAsync(CancellationToken cancellationToken = default)
         {
-            _cache.Clear();
+            cancellationToken.ThrowIfCancellationRequested();
+            Clear();
             return Task.CompletedTask;
         }
 
-        public Task<long> GetItemTimeToLiveAsync(string key, CancellationToken cancellationToken = default)
-            => Task.FromResult(GetItemTimeToLive(key));
+        #endregion
 
-        public Task<TimeSpan?> GetItemTimeSpanToLiveAsync(string key, CancellationToken cancellationToken = default)
-            => Task.FromResult(GetItemTimeSpanToLive(key));
+        #region Time to live
 
-        public long GetItemTimeToLive(string key)
-        {
-            if (_cache.TryGetValue(key, out var data))
-            {
-                long ttl = (long)data.Expiry.Subtract(DateTimeOffset.UtcNow).TotalSeconds;
-                return ttl;
-            }
-            return -1L;
-        }
-
+        /// <inheritdoc/>
         public TimeSpan? GetItemTimeSpanToLive(string key)
-            => (TimeSpan?)TimeSpan.FromSeconds(GetItemTimeToLive(key));
+            => TryGetLiveEntry(key, out var entry) && entry.Expiry is { } expiry ? expiry - _timeProvider.GetUtcNow() : null;
 
+        /// <inheritdoc/>
+        public long GetItemTimeToLive(string key)
+            => GetItemTimeSpanToLive(key) is { } ttl ? (long)ttl.TotalSeconds : -1;
 
-
-        public void Dispose() => _cache.Clear();
-
-        public Task SetAsync<T>(string key, T? data, int? cacheTime = null, CancellationToken cancellationToken = default)
+        /// <inheritdoc/>
+        public Task<TimeSpan?> GetItemTimeSpanToLiveAsync(string key, CancellationToken cancellationToken = default)
         {
-            if (data is not null)
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(GetItemTimeSpanToLive(key));
+        }
+
+        /// <inheritdoc/>
+        public Task<long> GetItemTimeToLiveAsync(string key, CancellationToken cancellationToken = default)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(GetItemTimeToLive(key));
+        }
+
+        #endregion
+
+        /// <inheritdoc/>
+        public void Dispose()
+        {
+            _cache.Clear();
+            GC.SuppressFinalize(this);
+        }
+
+        private bool TryGetLiveEntry(string key, out Entry entry)
+        {
+            if (key is null) throw new ArgumentNullException(nameof(key));
+            if (_cache.TryGetValue(key, out entry!))
             {
-                SetData(key, data, cacheTime);
+                if (!IsExpired(entry)) return true;
+
+                // Remove only this expired entry, not one written concurrently under the same key.
+                ((ICollection<KeyValuePair<string, Entry>>)_cache).Remove(new KeyValuePair<string, Entry>(key, entry));
             }
-            return Task.CompletedTask;
+            entry = null!;
+            return false;
         }
 
-        public Task SetAsync<T>(string key, T? data, TimeSpan? expiry, CancellationToken cancellationToken = default)
+        private bool HasRoomFor(string key)
         {
-            SetData(key, data, (int?)expiry?.TotalSeconds);
-            return Task.CompletedTask;
-        }
+            if (_cache.Count < _config.MaxEntriesCount || _cache.ContainsKey(key)) return true;
 
-        public void Set<T>(string key, T? value, int? cacheTime = null)
-        {
-            SetData(key, value, cacheTime);
-        }
-
-        public void Set<T>(string key, T? value, TimeSpan? expiry = null)
-        {
-            SetData(key, value, (int?)expiry?.TotalSeconds);
-        }
-
-        public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            await foreach (var item in acquireKeyPair)
+            foreach (var item in _cache)
             {
-                if (TryGetData<T>(item.Key, out var data))
-                {
-                    yield return data;
-                }
-                else
-                {
-                    var results = await item.Value();
-                    SetData<T>(item.Key, results, cacheTime: cacheTime);
-                    yield return results;
-                }
+                if (IsExpired(item.Value))
+                    ((ICollection<KeyValuePair<string, Entry>>)_cache).Remove(item);
             }
+            return _cache.Count < _config.MaxEntriesCount;
         }
 
-        public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
-        {
-            await foreach (var item in acquireKeyPair)
-            {
-                if (TryGetData<T>(item.Key, out var data))
-                {
-                    yield return data;
-                }
-                else
-                {
-                    var results = await item.Value;
-                    SetData<T>(item.Key, results, cacheTime: cacheTime);
-                    yield return results;
-                }
-            }
-        }
+        private bool IsExpired(Entry entry) => entry.Expiry is { } expiry && _timeProvider.GetUtcNow() >= expiry;
 
-        public async IAsyncEnumerable<T?> GetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, [EnumeratorCancellation] CancellationToken cancellationToken = default)
+        private sealed class Entry
         {
-            await foreach (var item in acquireKeyPair)
+            public Entry(string data, DateTimeOffset? expiry)
             {
-                if (TryGetData<T>(item.Key, out var data))
-                {
-                    yield return data;
-                }
-                else
-                {
-                    var results = item.Value;
-                    SetData<T>(item.Key, results, cacheTime: cacheTime);
-                    yield return results;
-                }
+                Data = data;
+                Expiry = expiry;
             }
-        }
 
-        public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Func<Task<T?>>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
-        {
-            await foreach (var item in acquireKeyPair)
-            {
-                SetData<T>(item.Key, await item.Value(), cacheTime);
-            }
-        }
+            public string Data { get; }
 
-        public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, Task<T?>>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
-        {
-            await foreach (var item in acquireKeyPair)
-            {
-                SetData<T>(item.Key, await item.Value, cacheTime);
-            }
-        }
-
-        public async Task SetAsync<T>(IAsyncEnumerable<KeyValuePair<string, T?>> acquireKeyPair, int? cacheTime, CancellationToken cancellationToken = default)
-        {
-            await foreach (var item in acquireKeyPair)
-            {
-                SetData<T>(item.Key, item.Value, cacheTime);
-            }
+            public DateTimeOffset? Expiry { get; }
         }
     }
 }
