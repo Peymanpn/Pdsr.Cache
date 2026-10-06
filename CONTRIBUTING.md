@@ -20,6 +20,7 @@ Packages are published to NuGet only when a version tag is pushed.
    git tag v4.0.0
    git push origin v4.0.0
    ```
-3. CI builds, tests and publishes. It stops without publishing if the tag doesn't match `<Version>`.
+3. CI builds and tests, then publishes to NuGet and creates a GitHub Release with generated notes and the packages attached.
+   It stops without publishing if the tag doesn't match `<Version>`.
 
-A version with a suffix such as `-beta.3` is published as a NuGet prerelease.
+A version with a suffix such as `-beta.3` is published as a NuGet prerelease and a GitHub pre-release.
