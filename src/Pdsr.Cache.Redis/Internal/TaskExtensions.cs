@@ -4,7 +4,8 @@ internal static class TaskExtensions
 {
     /// <summary>
     /// Stops waiting for <paramref name="task"/> when <paramref name="cancellationToken"/> fires.
-    /// StackExchange.Redis commands can't be cancelled once sent, so the command itself may still complete.
+    /// The task itself keeps running: StackExchange.Redis commands can't be cancelled once sent, so a cancelled
+    /// write may still be applied. A later fault of the abandoned task is observed so it isn't reported as unhandled.
     /// </summary>
     public static async Task<T> WithCancellation<T>(this Task<T> task, CancellationToken cancellationToken)
     {

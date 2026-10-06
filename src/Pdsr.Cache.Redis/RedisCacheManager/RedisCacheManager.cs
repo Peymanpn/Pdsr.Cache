@@ -14,6 +14,10 @@ namespace Pdsr.Cache;
 /// The read-through <c>Get</c>/<c>GetAsync</c> overloads that take an <c>acquire</c> delegate instead return
 /// the acquired value without caching it.
 /// The connection is owned by <see cref="IRedisConnectionFactory"/>; disposing the manager leaves it open.
+/// <para>
+/// StackExchange.Redis can't cancel a command once it is sent. Cancelling a token stops the caller waiting,
+/// but the command still reaches Redis, so a cancelled write may still be applied.
+/// </para>
 /// </remarks>
 public partial class RedisCacheManager : IRedisCacheManager
 {
