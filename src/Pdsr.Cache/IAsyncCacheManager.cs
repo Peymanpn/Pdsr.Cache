@@ -7,8 +7,12 @@ namespace Pdsr.Cache;
 /// Implementations backed by a remote store throw when the store is unreachable, so an outage is
 /// never reported as a cache miss. The read-through <c>GetAsync</c> overloads that take an
 /// <c>acquire</c> delegate are the exception: they fall back to <c>acquire</c> so callers still get a correct value.
-/// A cancelled <see cref="CancellationToken"/> stops the caller waiting with an <see cref="OperationCanceledException"/>;
-/// a command already sent to a remote store may still complete.
+/// <para>
+/// Cancellation stops the caller waiting: the call throws <see cref="OperationCanceledException"/>.
+/// It does not undo work already sent to a remote store. A command sent before the token fired may still run,
+/// so a cancelled <c>SetAsync</c> or <c>RemoveAsync</c> can still write or delete the key.
+/// A token that is already cancelled is rejected before anything is sent.
+/// </para>
 /// </remarks>
 public interface IAsyncCacheManager : IDisposable
 {

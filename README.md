@@ -61,6 +61,13 @@ if (cached.HasValue)
 Reads, writes and `IsSet` throw (`RedisConnectionException` or `RedisTimeoutException`) instead of reporting a miss.
 The read-through overloads that take an `acquire` delegate fall back to it and return a correct, uncached value.
 
+### Cancellation
+
+Every async method takes a `CancellationToken`. Cancelling it stops the caller waiting and throws `OperationCanceledException`,
+but it can't recall a command that was already sent to Redis or SQL Server. That command may still run,
+so a cancelled `SetAsync` or `RemoveAsync` can still write or delete the key. A token that is already cancelled is rejected
+before anything is sent.
+
 ### Sharing a Redis server
 
 Set `KeyPrefix` so each application has its own keyspace. With a prefix, `Clear` and `RemoveByPattern`

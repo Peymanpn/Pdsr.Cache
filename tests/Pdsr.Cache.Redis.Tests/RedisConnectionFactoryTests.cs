@@ -103,7 +103,7 @@ public class RedisConnectionFactoryTests
         using var factory = new CountingFactory(Config("localhost:6379"));
 
         Assert.Single(factory.Options.EndPoints);
-        Assert.Equal(0, factory.SyncConnects + factory.AsyncConnects);
+        Assert.Equal(0, factory.AsyncConnects);
     }
 
     #endregion
@@ -122,11 +122,10 @@ public class RedisConnectionFactoryTests
         Assert.Same(first, second);
         Assert.Same(first, third);
         Assert.Equal(1, factory.AsyncConnects);
-        Assert.Equal(0, factory.SyncConnects);
     }
 
     [Fact]
-    public async Task Sync_callers_connect_synchronously_and_share_one_connection()
+    public async Task Sync_callers_use_the_same_connect_as_async_callers()
     {
         using var factory = new CountingFactory(Config("localhost"));
 
@@ -134,8 +133,26 @@ public class RedisConnectionFactoryTests
         var second = await factory.ConnectionAsync(Ct);
 
         Assert.Same(first, second);
-        Assert.Equal(1, factory.SyncConnects);
-        Assert.Equal(0, factory.AsyncConnects);
+        Assert.Equal(1, factory.AsyncConnects);
+    }
+
+    [Fact(Timeout = 10_000)]
+    public async Task A_slow_connect_does_not_block_other_callers()
+    {
+        // The transport blocks its calling thread until the gate opens, like an unreachable host during the connect timeout.
+        using var factory = new CountingFactory(Config("localhost")) { Gate = new TaskCompletionSource(), BlockSynchronously = true };
+        var syncCaller = Task.Run(factory.Connection, Ct);
+        while (factory.AsyncConnects == 0) await Task.Delay(5, Ct);
+
+        var started = DateTime.UtcNow;
+        var asyncCaller = factory.ConnectionAsync(Ct);
+        var elapsed = DateTime.UtcNow - started;
+
+        Assert.False(asyncCaller.IsCompleted);
+        Assert.True(elapsed < TimeSpan.FromSeconds(1), $"ConnectionAsync blocked for {elapsed}");
+        factory.Gate.SetResult();
+        Assert.Same(await syncCaller, await asyncCaller);
+        Assert.Equal(1, factory.AsyncConnects);
     }
 
     [Fact]
@@ -181,7 +198,7 @@ public class RedisConnectionFactoryTests
 
         Assert.Throws<RedisConnectionException>(factory.Connection);
         Assert.NotNull(factory.Connection());
-        Assert.Equal(2, factory.SyncConnects);
+        Assert.Equal(2, factory.AsyncConnects);
     }
 
     [Fact]
@@ -234,12 +251,11 @@ public class RedisConnectionFactoryTests
     {
         var factory = new CountingFactory(Config("localhost"));
         factory.Dispose();
-        Assert.Equal(0, factory.SyncConnects + factory.AsyncConnects);
+        Assert.Equal(0, factory.AsyncConnects);
     }
 
     private sealed class CountingFactory(IRedisConfiguration configuration) : RedisConnectionFactory(configuration)
     {
-        public int SyncConnects;
         public int AsyncConnects;
 
         public int FailuresBeforeSuccess { get; init; }
@@ -248,16 +264,14 @@ public class RedisConnectionFactoryTests
 
         public TaskCompletionSource? Gate { get; init; }
 
-        protected override IConnectionMultiplexer Connect(ConfigurationOptions options)
-        {
-            if (Interlocked.Increment(ref SyncConnects) <= FailuresBeforeSuccess) throw Failure();
-            return Substitute.For<IConnectionMultiplexer>();
-        }
+        /// <summary>Block the calling thread on <see cref="Gate"/> before returning.</summary>
+        public bool BlockSynchronously { get; init; }
 
         protected override Task<IConnectionMultiplexer> ConnectAsync(ConfigurationOptions options)
         {
             var attempt = Interlocked.Increment(ref AsyncConnects);
             if (attempt <= FailuresBeforeSuccess && ThrowSynchronously) throw Failure();
+            if (BlockSynchronously) Gate!.Task.Wait();
             return Complete(attempt);
         }
 

@@ -66,23 +66,10 @@ public class RedisConnectionFactory : IRedisConnectionFactory
         return options;
     }
 
-    /// <inheritdoc/>
-    public IConnectionMultiplexer Connection()
-    {
-        Task<IConnectionMultiplexer> pending;
-        lock (_gate)
-        {
-            ThrowIfDisposed();
-            if (_connection is null || _connection.IsFaulted || _connection.IsCanceled)
-            {
-                var connection = Connect(Options);
-                _connection = Task.FromResult(connection);
-                return connection;
-            }
-            pending = _connection;
-        }
-        return pending.GetAwaiter().GetResult();
-    }
+    /// <summary>
+    /// Returns the shared connection, blocking until it is open. Synchronous and asynchronous callers share one connect.
+    /// </summary>
+    public IConnectionMultiplexer Connection() => ConnectionAsync().GetAwaiter().GetResult();
 
     /// <inheritdoc/>
     public Task<IConnectionMultiplexer> ConnectionAsync(CancellationToken cancellationToken = default)
@@ -93,7 +80,9 @@ public class RedisConnectionFactory : IRedisConnectionFactory
             ThrowIfDisposed();
             if (_connection is null || _connection.IsFaulted || _connection.IsCanceled)
             {
-                _connection = StartConnect();
+                // Started on the thread pool so no connect work runs under the lock or on the caller's thread,
+                // and an exception thrown before the connect goes async still ends up in the task.
+                _connection = Task.Run(() => ConnectAsync(Options));
             }
             pending = _connection;
         }
@@ -101,30 +90,10 @@ public class RedisConnectionFactory : IRedisConnectionFactory
     }
 
     /// <summary>
-    /// Opens a connection synchronously. Override to substitute the transport.
-    /// </summary>
-    protected virtual IConnectionMultiplexer Connect(ConfigurationOptions options)
-        => ConnectionMultiplexer.Connect(options);
-
-    /// <summary>
-    /// Opens a connection asynchronously. Override to substitute the transport.
+    /// Opens a connection. Override to substitute the transport.
     /// </summary>
     protected virtual async Task<IConnectionMultiplexer> ConnectAsync(ConfigurationOptions options)
         => await ConnectionMultiplexer.ConnectAsync(options).ConfigureAwait(false);
-
-    private Task<IConnectionMultiplexer> StartConnect()
-    {
-        try
-        {
-            return ConnectAsync(Options);
-        }
-        catch (Exception ex)
-        {
-            var failed = new TaskCompletionSource<IConnectionMultiplexer>();
-            failed.SetException(ex);
-            return failed.Task;
-        }
-    }
 
     private void ThrowIfDisposed()
     {

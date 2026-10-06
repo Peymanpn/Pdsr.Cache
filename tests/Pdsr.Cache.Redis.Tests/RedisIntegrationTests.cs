@@ -215,7 +215,5 @@ public class RedisIntegrationTests
     private sealed class OptionsFactory(IRedisConfiguration configuration, ConfigurationOptions options) : RedisConnectionFactory(configuration)
     {
         protected override Task<IConnectionMultiplexer> ConnectAsync(ConfigurationOptions _) => base.ConnectAsync(options);
-
-        protected override IConnectionMultiplexer Connect(ConfigurationOptions _) => base.Connect(options);
     }
 }
