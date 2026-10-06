@@ -11,9 +11,10 @@ public interface IAsyncCacheManager : IDisposable
     /// <typeparam name="T">Type of cached item</typeparam>
     /// <param name="key">Cache key</param>
     /// <param name="acquire">Function to acquire date if it's not in the cache yet</param>
-    /// <param name="cacheTime">Cache time in seconds. Pass null to cache indefenitely</param>
+    /// <param name="cacheTime">Cache time in seconds. Pass null to cache indefinitely</param>
+    /// <param name="cancellationToken"></param>
     /// <returns>The cached value associated with the specified key.
-    /// If cached data does not exists and results of <paramref name="acquireTask"/> is null, returns null.
+    /// If cached data does not exists and results of <paramref name="acquire"/> is null, returns null.
     /// </returns>
     Task<T?> GetAsync<T>(string key, Func<Task<T?>> acquire, int? cacheTime = null, CancellationToken cancellationToken = default);
 

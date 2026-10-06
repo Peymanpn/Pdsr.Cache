@@ -12,7 +12,7 @@ public partial class RedisCacheManager
     private Task SetAsyncInternal<T>(string key, T? data, TimeSpan? expiry = null, CancellationToken cancellationToken = default)
     {
         if (data is not null)
-            return Redis.StringSetAsync(key, Serialize(data), expiry);
+            return Redis.StringSetAsync(key, Serialize(data), expiry, When.Always);
         else
             return Task.CompletedTask;
     }
@@ -26,7 +26,7 @@ public partial class RedisCacheManager
     private void SetInternal<T>(string key, T? data, TimeSpan? expiry = null)
     {
         if (data is not null)
-            Redis.StringSetAsync(key, Serialize(data), expiry);
+            Redis.StringSetAsync(key, Serialize(data), expiry, When.Always);
     }
 
 
@@ -92,18 +92,23 @@ public partial class RedisCacheManager
         // if we don't use timed caching, we can set all together in one go
         if (cacheTime is null)
         {
-            var allPairs = await acquireTasksKeyPair
-                .SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value()))
-                .Where(a => a.Value is not null)
-                .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
-                .ToArrayAsync();
-            await Redis.StringSetAsync(allPairs);
+            var allPairs = new List<KeyValuePair<RedisKey, RedisValue>>();
+            await foreach (var a in acquireTasksKeyPair.WithCancellation(cancellationToken))
+            {
+                var value = await a.Value();
+                if (value is not null)
+                    allPairs.Add(new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(value)));
+            }
+            await Redis.StringSetAsync(allPairs.ToArray());
         }
         else
         {
-            await acquireTasksKeyPair.SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value()))
-                .Where(a => a.Value is not null)
-                .ForEachAsync(a => SetAsyncInternal<T>(a.Key, a.Value, cacheTime, cancellationToken));
+            await foreach (var a in acquireTasksKeyPair.WithCancellation(cancellationToken))
+            {
+                var value = await a.Value();
+                if (value is not null)
+                    await SetAsyncInternal<T>(a.Key, value, cacheTime, cancellationToken);
+            }
         }
     }
 
@@ -113,17 +118,23 @@ public partial class RedisCacheManager
         // if we don't use timed caching, we can set all together in one go
         if (cacheTime is null)
         {
-            var values = await acquireKeyPair.SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value))
-                .Where(a => a.Value is not null)
-                .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
-                .ToArrayAsync();
-            await Redis.StringSetAsync(values);
+            var values = new List<KeyValuePair<RedisKey, RedisValue>>();
+            await foreach (var a in acquireKeyPair.WithCancellation(cancellationToken))
+            {
+                var value = await a.Value;
+                if (value is not null)
+                    values.Add(new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(value)));
+            }
+            await Redis.StringSetAsync(values.ToArray());
         }
         else
         {
-            await acquireKeyPair.SelectAwait(async a => new KeyValuePair<string, T?>(a.Key, await a.Value))
-                .Where(a => a.Value is not null)
-                .ForEachAsync(a => SetAsyncInternal<T>(a.Key, a.Value, cacheTime, cancellationToken));
+            await foreach (var a in acquireKeyPair.WithCancellation(cancellationToken))
+            {
+                var value = await a.Value;
+                if (value is not null)
+                    await SetAsyncInternal<T>(a.Key, value, cacheTime, cancellationToken);
+            }
         }
     }
 
@@ -135,13 +146,16 @@ public partial class RedisCacheManager
         {
             var values = await acquireKeyPair.Where(a => a.Value is not null)
                     .Select(a => new KeyValuePair<RedisKey, RedisValue>(a.Key, Serialize(a.Value)))
-                    .ToArrayAsync();
+                    .ToArrayAsync(cancellationToken);
             await Redis.StringSetAsync(values);
         }
         else
         {
-            await acquireKeyPair.Where(a => a.Value is not null)
-                .ForEachAsync(a => SetAsyncInternal(a.Key, a.Value, cacheTime, cancellationToken))                ;
+            await foreach (var a in acquireKeyPair.WithCancellation(cancellationToken))
+            {
+                if (a.Value is not null)
+                    await SetAsyncInternal(a.Key, a.Value, cacheTime, cancellationToken);
+            }
         }
     }
 
