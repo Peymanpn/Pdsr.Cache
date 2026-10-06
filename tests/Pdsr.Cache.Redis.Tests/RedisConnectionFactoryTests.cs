@@ -139,13 +139,14 @@ public class RedisConnectionFactoryTests
     [Fact(Timeout = 10_000)]
     public async Task A_slow_connect_does_not_block_other_callers()
     {
+        var ct = TestContext.Current.CancellationToken;
         // The transport blocks its calling thread until the gate opens, like an unreachable host during the connect timeout.
         using var factory = new CountingFactory(Config("localhost")) { Gate = new TaskCompletionSource(), BlockSynchronously = true };
-        var syncCaller = Task.Run(factory.Connection, Ct);
-        while (factory.AsyncConnects == 0) await Task.Delay(5, Ct);
+        var syncCaller = Task.Run(factory.Connection, ct);
+        while (factory.AsyncConnects == 0) await Task.Delay(5, ct);
 
         var started = DateTime.UtcNow;
-        var asyncCaller = factory.ConnectionAsync(Ct);
+        var asyncCaller = factory.ConnectionAsync(ct);
         var elapsed = DateTime.UtcNow - started;
 
         Assert.False(asyncCaller.IsCompleted);
