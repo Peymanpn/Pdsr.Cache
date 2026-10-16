@@ -7,6 +7,8 @@
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Caching.SqlServer" Version="10.0.12" />
     <PackageReference Include="System.Text.Json" Version="10.0.12" />
+    <!-- Microsoft.Data.SqlClient (via Caching.SqlServer) brings in Pkcs 9.0.4, which has CVE-2026-84008 and CVE-2026-70162; 9.0.21 is patched. -->
+    <PackageReference Include="System.Security.Cryptography.Pkcs" Version="9.0.21" />
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\Pdsr.Cache\Pdsr.Cache.csproj" />
