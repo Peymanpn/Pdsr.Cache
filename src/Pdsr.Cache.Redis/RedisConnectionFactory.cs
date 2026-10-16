@@ -32,6 +32,7 @@ public class RedisConnectionFactory : IRedisConnectionFactory
     /// Translates <paramref name="configuration"/> into StackExchange.Redis options.
     /// </summary>
     /// <exception cref="ArgumentException">No endpoints are configured, or one can't be parsed.</exception>
+    /// <exception cref="ArgumentOutOfRangeException">A timeout is set to zero or less.</exception>
     public static ConfigurationOptions CreateConfigurationOptions(IRedisConfiguration configuration)
     {
         if (configuration is null) throw new ArgumentNullException(nameof(configuration));
@@ -63,8 +64,29 @@ public class RedisConnectionFactory : IRedisConnectionFactory
             options.EndPoints.Add(endpoint.Trim());
         }
 
+        if (configuration is IRedisTimeoutConfiguration timeouts)
+            ApplyTimeouts(timeouts, options);
+
         return options;
     }
+
+    /// <summary>
+    /// Maps only what is set, so anything left unset keeps the StackExchange.Redis default.
+    /// </summary>
+    private static void ApplyTimeouts(IRedisTimeoutConfiguration timeouts, ConfigurationOptions options)
+    {
+        if (timeouts.FailFastWhenDisconnected)
+            options.BacklogPolicy = BacklogPolicy.FailFast;
+
+        if (timeouts.AsyncTimeout is { } asyncTimeout)
+            options.AsyncTimeout = Positive(asyncTimeout, nameof(IRedisTimeoutConfiguration.AsyncTimeout));
+
+        if (timeouts.SyncTimeout is { } syncTimeout)
+            options.SyncTimeout = Positive(syncTimeout, nameof(IRedisTimeoutConfiguration.SyncTimeout));
+    }
+
+    private static int Positive(int milliseconds, string name)
+        => milliseconds > 0 ? milliseconds : throw new ArgumentOutOfRangeException(name, milliseconds, "Timeouts must be positive milliseconds.");
 
     /// <summary>
     /// Returns the shared connection, blocking until it is open. Synchronous and asynchronous callers share one connect.

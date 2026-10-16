@@ -88,6 +88,63 @@ public class RedisConnectionFactoryTests
     }
 
     [Fact]
+    public void Timeout_settings_are_mapped_when_set()
+    {
+        var options = RedisConnectionFactory.CreateConfigurationOptions(new RedisConfiguration
+        {
+            EndPoints = ["localhost"],
+            FailFastWhenDisconnected = true,
+            AsyncTimeout = 1234,
+            SyncTimeout = 2345,
+        });
+
+        Assert.Same(BacklogPolicy.FailFast, options.BacklogPolicy);
+        Assert.False(options.BacklogPolicy.QueueWhileDisconnected);
+        Assert.Equal(1234, options.AsyncTimeout);
+        Assert.Equal(2345, options.SyncTimeout);
+    }
+
+    [Fact]
+    public void Unset_timeout_settings_keep_the_library_defaults()
+    {
+        var defaults = new ConfigurationOptions();
+        var custom = Substitute.For<IRedisConfiguration>();
+        custom.EndPoints.Returns(["localhost"]);
+
+        foreach (var configuration in new IRedisConfiguration[] { Config("localhost"), custom })
+        {
+            var options = RedisConnectionFactory.CreateConfigurationOptions(configuration);
+
+            Assert.Same(defaults.BacklogPolicy, options.BacklogPolicy);
+            Assert.True(options.BacklogPolicy.QueueWhileDisconnected);
+            Assert.Equal(defaults.AsyncTimeout, options.AsyncTimeout);
+            Assert.Equal(defaults.SyncTimeout, options.SyncTimeout);
+        }
+    }
+
+    [Fact]
+    public void Fail_fast_is_off_by_default()
+    {
+        var configuration = new RedisConfiguration();
+
+        Assert.False(configuration.FailFastWhenDisconnected);
+        Assert.Null(configuration.AsyncTimeout);
+        Assert.Null(configuration.SyncTimeout);
+    }
+
+    [Theory]
+    [InlineData(0, null)]
+    [InlineData(-1, null)]
+    [InlineData(null, 0)]
+    public void Non_positive_timeouts_are_rejected(int? asyncTimeout, int? syncTimeout)
+    {
+        var configuration = new RedisConfiguration { EndPoints = ["localhost"], AsyncTimeout = asyncTimeout, SyncTimeout = syncTimeout };
+
+        var error = Assert.Throws<ArgumentOutOfRangeException>(() => RedisConnectionFactory.CreateConfigurationOptions(configuration));
+        Assert.Equal(asyncTimeout is null ? "SyncTimeout" : "AsyncTimeout", error.ParamName);
+    }
+
+    [Fact]
     public void Missing_or_blank_endpoints_are_rejected()
     {
         Assert.Throws<ArgumentNullException>(() => RedisConnectionFactory.CreateConfigurationOptions(null!));

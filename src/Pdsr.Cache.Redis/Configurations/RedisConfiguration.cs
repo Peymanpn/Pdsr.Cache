@@ -3,7 +3,7 @@ namespace Pdsr.Cache.Configurations;
 /// <summary>
 /// Redis Configurations for setting up <see cref="RedisConnectionFactory"/>
 /// </summary>
-public class RedisConfiguration : IRedisConfiguration
+public class RedisConfiguration : IRedisConfiguration, IRedisTimeoutConfiguration
 {
     /// <inheritdoc/>
     public string[] EndPoints { get; set; } = [];
@@ -40,4 +40,13 @@ public class RedisConfiguration : IRedisConfiguration
 
     /// <inheritdoc/>
     public bool AllowFlushDatabase { get; set; }
+
+    /// <inheritdoc/>
+    public bool FailFastWhenDisconnected { get; set; }
+
+    /// <inheritdoc/>
+    public int? AsyncTimeout { get; set; }
+
+    /// <inheritdoc/>
+    public int? SyncTimeout { get; set; }
 }
