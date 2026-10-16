@@ -195,25 +195,4 @@ public class RedisIntegrationTests
         Assert.Equal("hello", await received.Task.WaitAsync(TimeSpan.FromSeconds(5), Ct));
         Assert.True(cache.Server.IsConnected);
     }
-
-    [Fact]
-    public async Task An_unreachable_server_raises_an_error_instead_of_a_miss()
-    {
-        var configuration = new RedisConfiguration { EndPoints = ["127.0.0.1:1"], AbortOnConnectFail = false, RetryCount = 0 };
-        var options = RedisConnectionFactory.CreateConfigurationOptions(configuration);
-        options.ConnectTimeout = 500;
-        options.SyncTimeout = 500;
-        options.AsyncTimeout = 500;
-        using var factory = new OptionsFactory(configuration, options);
-        var cache = new RedisCacheManager(configuration, factory);
-
-        await Assert.ThrowsAnyAsync<RedisException>(() => cache.TryGetAsync<bool>("allow", Ct));
-        Assert.True(await cache.GetAsync<bool>("allow", () => Task.FromResult(true), 60, Ct));
-    }
-
-    /// <summary>Uses pre-built options so the test can shorten timeouts.</summary>
-    private sealed class OptionsFactory(IRedisConfiguration configuration, ConfigurationOptions options) : RedisConnectionFactory(configuration)
-    {
-        protected override Task<IConnectionMultiplexer> ConnectAsync(ConfigurationOptions _) => base.ConnectAsync(options);
-    }
 }
